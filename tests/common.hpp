@@ -12,8 +12,13 @@
 #include <string>
 #include <vector>
 
+#if defined(__linux__)
 #include <linux/perf_event.h>
 #include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <libproc.h>
+#include <sys/resource.h>
+#endif
 #include <unistd.h>
 
 #include "ddfast.hpp"
@@ -135,7 +140,23 @@ inline std::vector<int> parse_cpus(const std::string& t) {
   return v;
 }
 
-// A counter of the calling thread's user-mode events, or -1 (no permission or no counters).
+// A counter of the calling thread's user-mode events, or -1 (no permission or no counters;
+// always -1 off Linux).
+#if defined(__APPLE__)
+// macOS: the process's cycles and instructions from proc_pid_rusage (all threads, user and
+// system; the benchmarks read them around single-threaded work).
+enum { PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS };
+inline int perf_open(unsigned long long config) { return int(config); }
+inline long long perf_read(int fd) {
+  rusage_info_v4 ri{};
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&ri)) != 0) return -1;
+  return fd == PERF_COUNT_HW_CPU_CYCLES ? (long long)ri.ri_cycles : fd == PERF_COUNT_HW_INSTRUCTIONS ? (long long)ri.ri_instructions : -1;
+}
+#elif !defined(__linux__)
+enum { PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS };
+inline int perf_open(unsigned long long) { return -1; }
+inline long long perf_read(int) { return -1; }
+#else
 inline int perf_open(unsigned long long config) {
   perf_event_attr a{};
   a.type = PERF_TYPE_HARDWARE;
@@ -149,6 +170,7 @@ inline long long perf_read(int fd) {
   long long v = 0;
   return fd >= 0 && read(fd, &v, 8) == 8 ? v : -1;
 }
+#endif
 
 // The table directory for init(): $DDCLAIM_DIR if set (init() reads it), else the default.
 inline void init_or_exit() {

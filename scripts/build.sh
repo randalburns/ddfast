@@ -8,7 +8,9 @@
 #   bin/bench_tables     full-table benchmark against DDS CalcDDtable (bench/bench_tables.cpp)
 #   bin/libdds.a         DDS (extern/dds), for the tests and benchmarks only
 #
-# Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native), Linux, and the submodules
+# Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native) on Linux, or Apple silicon on
+# macOS (-mcpu=native; NEON in place of AVX-512, see extern/ddclaim/include/ddclaim/port.hpp),
+# and the submodules
 # (git clone --recursive, or git submodule update --init). Uses clang++ if present, else g++;
 # set CXX to choose. Environment:
 #   XFLAGS="..."  more flags for ddfast's own sources, e.g. -DSTATS (prints search counters,
@@ -43,7 +45,15 @@ if [ -z "${CXX:-}" ]; then
 fi
 XFLAGS=${XFLAGS:-}
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-BASE="-std=c++20 -O3 -DNDEBUG -march=native"
+case "$(uname -m)" in
+  arm64|aarch64)
+    ARCH="-mcpu=native"
+    # Apple clang may know the CPU only as an older one (an M5 as apple-m3); add the scalar
+    # popcount and count-trailing-zeros instructions (CSSC) when the CPU has them.
+    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc" ;;
+  *) ARCH="-march=native" ;;
+esac
+BASE="-std=c++20 -O3 -DNDEBUG $ARCH"
 INC="-Iinclude -Iextern/ddclaim/include"
 DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"

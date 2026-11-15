@@ -5,7 +5,7 @@
 // Everything here is internal (an anonymous namespace); the entry points are in namespace
 // ddfast::detail at the end, used by api.cpp.
 #include <unordered_map>
-#include <immintrin.h>
+#include "ddclaim/port.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -41,6 +41,20 @@ namespace {
 using namespace ddclaim::bits;
 using namespace ddclaim::tables;
 using ddclaim::Position;
+
+// The suit lengths of seats 0..3 in suits 1..3, packed (pext of lens by 0xFFF0FFF0FFF0FFF0).
+inline u64 lens48(u64 x) {
+  return ((x >> 4) & 0xFFF) | ((x >> 20) & 0xFFF) << 12 | ((x >> 36) & 0xFFF) << 24 | ((x >> 52) & 0xFFF) << 36;
+}
+// The 16 nibbles of x as bytes.
+inline void spread_nibbles(u64 x, uint8_t* out) {
+#if DDCLAIM_X86
+  _mm_storeu_si128((__m128i*)out, _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)x), _mm_cvtsi64_si128((long long)(x >> 4)))));
+#else
+  const uint8x8_t v = vcreate_u8(x);
+  vst1q_u8(out, vandq_u8(vdupq_n_u8(15), vcombine_u8(vzip1_u8(v, vshr_n_u8(v, 4)), vzip2_u8(v, vshr_n_u8(v, 4)))));
+#endif
+}
 
 #ifdef DBG
 }
@@ -155,10 +169,35 @@ WBucket* g_wtt;
 thread_local unsigned g_wrr;
 constexpr u64 W52 = (1ull << 52) - 1, WKM = 0xFFFFFFFF0003FFFFull;
 
-// The position being searched. Thread-local so that table building can use several threads.
-thread_local u64 H[4];
-thread_local u64 LENS;  // nibble 4*seat+suit: the length of that holding
-thread_local uint32_t g_gen = 1;
+// The position being searched and the search's other per-thread scalars. Thread-local so
+// that table building can use several threads. They are kept in one thread-local struct and
+// named through macros: on macOS every thread-local variable costs a call to find its address
+// (once per function that uses it), so one variable instead of several saves calls in every
+// node; elsewhere it makes no difference.
+struct SState;
+struct Hot {
+  u64 H[4] = {0, 0, 0, 0};
+  u64 LENS = 0;  // nibble 4*seat+suit: the length of that holding
+  SState* S = nullptr;  // set on first use (see ensure_state)
+  uint32_t gen = 1;
+  bool skiptt = false;  // the next lead node's table lookup is known to miss
+  bool rvalid = false;
+  bool expfalse = false;
+  int snapdepth = 0;
+  u64 skiphint = 0;     // and this is the hint it would have found
+  u64 mnodes = 0;
+};
+thread_local Hot g_hot;
+#define H (g_hot.H)
+#define LENS (g_hot.LENS)
+#define S (g_hot.S)
+#define g_gen (g_hot.gen)
+#define g_skiptt (g_hot.skiptt)
+#define g_skiphint (g_hot.skiphint)
+#define g_rvalid (g_hot.rvalid)
+#define g_expfalse (g_hot.expfalse)
+#define g_snapdepth (g_hot.snapdepth)
+#define g_mnodes (g_hot.mnodes)
 
 inline Bucket& bucket_for(u64 tag) { return g_tt[((tag ^ g_gen) * 0x9E3779B97F4A7C15ull) >> (64 - TT_BITS)]; }
 
@@ -240,7 +279,9 @@ struct TT {
     pool = static_cast<u64*>(mmap(nullptr, pb, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     next = static_cast<uint32_t*>(mmap(nullptr, nb, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     // LEAN_NOHUGE: 4 KB pages everywhere (to measure what huge pages give).
+#ifdef MADV_HUGEPAGE
     if (!getenv("LEAN_NOHUGE") && !getenv("LEAN_NOHUGE_TT")) madvise(dir, db, MADV_HUGEPAGE), madvise(pool, pb, MADV_HUGEPAGE), madvise(next, nb, MADV_HUGEPAGE);
+#endif
   }
   void new_gen() {
     if (++gen == 0) memset(dir, 0, sizeof(DirSlot) << DIR_MAX), gen = 1;
@@ -249,7 +290,7 @@ struct TT {
     used = 0, keys = 0, bits = DIR_MIN;
     new_gen();
   }
-  inline void prefetch(u64 key54) const { _mm_prefetch((const char*)&dir[(key54 * 0x9E3779B97F4A7C15ull) >> (64 - bits)], _MM_HINT_T0); }
+  inline void prefetch(u64 key54) const { ddport::prefetch(&dir[(key54 * 0x9E3779B97F4A7C15ull) >> (64 - bits)]); }
   inline DirSlot* find(u64 key54) {
     size_t h = (key54 * 0x9E3779B97F4A7C15ull) >> (64 - bits);
     for (;;) {
@@ -307,8 +348,6 @@ struct SState {
   u64 mcost[14][64];
 };
 thread_local SState g_sdef;
-// Constant-initialized (set on first use) so that accesses need no TLS wrapper call.
-thread_local SState* S = nullptr;
 inline void ensure_state() { if (!S) [[unlikely]] S = &g_sdef; }
 
 inline void fill_holdings(port::Pos& t) {
@@ -316,8 +355,7 @@ inline void fill_holdings(port::Pos& t) {
   const u64 all = H[0] | H[1] | H[2] | H[3];
   memcpy(t.aggr, &all, 8);
   // LENS has a nibble per holding; spread to a byte each.
-  const __m128i len = _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)LENS), _mm_cvtsi64_si128((long long)(LENS >> 4))));
-  _mm_storeu_si128((__m128i*)t.length, len);
+  spread_nibbles(LENS, reinterpret_cast<uint8_t*>(t.length));
 }
 inline void fill_tops(int n, port::Pos& t) {
   for (int l = 0; l < 4; l++) {
@@ -386,8 +424,8 @@ struct NB {
   inline void init(u64 a) {
     h[0] = H[0], h[1] = H[1], h[2] = H[2], h[3] = H[3], lens = LENS;
     all = a;
-    const __m128i lv = _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)LENS), _mm_cvtsi64_si128((long long)(LENS >> 4))));
-    _mm_storeu_si128((__m128i*)ln, lv);
+    spread_nibbles(LENS, ln);
+#if DDCLAIM_X86
     __m256i x = _mm256_and_si256(_mm256_set1_epi64x((long long)a), _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0)));
     const __m256i top = _mm256_set1_epi64x((long long)(1ull << 63));
     const __m256i v1 = _mm256_set1_epi64x((long long)H[1]), v2 = _mm256_set1_epi64x((long long)H[2]), v3 = _mm256_set1_epi64x((long long)H[3]);
@@ -405,6 +443,19 @@ struct NB {
     level(wb, wh);
     level(sbv, sbo);
     level(tbv, tbo);
+#else
+    for (int s = 0; s < 4; s++) {
+      u64 x = a & LANE(s);
+      u64* const cs[3] = {wb, sbv, tbv};
+      int* const os[3] = {wh, sbo, tbo};
+      for (int j = 0; j < 3; j++) {
+        const u64 t = x ? highest(x) : 0;
+        x ^= t;
+        cs[j][s] = t;
+        os[j][s] = owner_of(t);
+      }
+    }
+#endif
   }
 #endif
 };
@@ -453,11 +504,26 @@ __attribute__((always_inline)) inline int nq_quick(const NB& b, int hand, int n,
   // a second card of partner's under the leader's top (the opponents following or out of trumps).
   {
     auto q = [](unsigned m, int x) { return (m >> (4 * x)) & 15u; };
+#if DDCLAIM_X86
     const __m128i lv = _mm_loadu_si128((const __m128i*)b.ln);
     const unsigned nzm = _mm_test_epi8_mask(lv, lv), g2m = _mm_cmpgt_epi8_mask(lv, _mm_set1_epi8(1));
     const __m256i vw = _mm256_load_si256((const __m256i*)b.wb), vP = _mm256_set1_epi64x((long long)b.h[P]);
     const unsigned topP = _mm256_test_epi64_mask(vw, vP), topH = _mm256_test_epi64_mask(vw, _mm256_set1_epi64x((long long)b.h[hand]));
     const unsigned sbP = _mm256_test_epi64_mask(_mm256_load_si256((const __m256i*)b.sbv), vP);
+#else
+    // The lengths (byte 4 * hand + suit) that are nonzero, and at least 2, as bit masks.
+    const uint8x16_t lv = vld1q_u8(b.ln);
+    const uint8x16_t bitv = vreinterpretq_u8_u64(vdupq_n_u64(0x8040201008040201ull));
+    auto mask16 = [&](uint8x16_t m) {
+      const uint8x16_t t = vandq_u8(m, bitv);
+      return unsigned(vaddv_u8(vget_low_u8(t))) | unsigned(vaddv_u8(vget_high_u8(t))) << 8;
+    };
+    const unsigned nzm = mask16(vtstq_u8(lv, lv)), g2m = mask16(vcgtq_u8(lv, vdupq_n_u8(1)));
+    const unsigned topP = unsigned((b.wb[0] & b.h[P]) != 0) | unsigned((b.wb[1] & b.h[P]) != 0) << 1 | unsigned((b.wb[2] & b.h[P]) != 0) << 2 | unsigned((b.wb[3] & b.h[P]) != 0) << 3;
+    const u64 hh = b.h[hand];
+    const unsigned topH = unsigned((b.wb[0] & hh) != 0) | unsigned((b.wb[1] & hh) != 0) << 1 | unsigned((b.wb[2] & hh) != 0) << 2 | unsigned((b.wb[3] & hh) != 0) << 3;
+    const unsigned sbP = unsigned((b.sbv[0] & b.h[P]) != 0) | unsigned((b.sbv[1] & b.h[P]) != 0) << 1 | unsigned((b.sbv[2] & b.h[P]) != 0) << 2 | unsigned((b.sbv[3] & b.h[P]) != 0) << 3;
+#endif
     unsigned safe = 15;
     if (!NT) {
       const unsigned l = q(nzm, LH), r = q(nzm, RH);
@@ -934,12 +1000,24 @@ inline bool dds_bounds(int n, int L, int target, u64 all, bool& filled, u64& R, 
 #else
   // The same for the four suits at once: per lane, the side's cards above the other side's
   // highest card (lanes are disjoint, so one popcount of their union).
+#if DDCLAIM_X86
   const __m256i lanes = _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0));
   const __m256i oth = _mm256_and_si256(_mm256_set1_epi64x((long long)(all & ~side)), lanes);
   const __m256i below = _mm256_srlv_epi64(_mm256_set1_epi64x(-1), _mm256_lzcnt_epi64(oth));
   const __m256i tv = _mm256_andnot_si256(below, _mm256_and_si256(_mm256_set1_epi64x((long long)side), lanes));
   const __m128i t2 = _mm_or_si128(_mm256_castsi256_si128(tv), _mm256_extracti128_si256(tv, 1));
   const int u = popc(u64(_mm_cvtsi128_si64(_mm_or_si128(t2, _mm_unpackhi_epi64(t2, t2)))));
+#else
+  u64 tv = 0;
+  {
+    const u64 o = all & ~side;
+    for (int l = 0; l < 4; l++) {
+      const u64 ol = o & LANE(l);
+      tv |= side & LANE(l) & (ol ? ~((u64(2) << (63 - __builtin_clzll(ol))) - 1) : ~u64(0));
+    }
+  }
+  const int u = popc(tv);
+#endif
 #endif
 #ifdef CHK_U
   { int u0 = 0; for (int l = 0; l < 4; l++) { u64 ts; u0 += tops(side & LANE(l), all & LANE(l), ts); }
@@ -1061,9 +1139,8 @@ inline int dds_order(int n, int K, int L, u64 hint, u64* cards, uint16_t* key) {
   // `sequence` only says whether the run has more cards (all the weights ask).
   u64 allx = H[0] | H[1] | H[2] | H[3];
   for (int k = 0; k < K; k++) allx |= S->trk[n][k];
-  const u64 pp = allx | GUARD;
-  const u64 pm = _pext_u64(H[cur], pp), hc = pm & ~(pm >> 1);
-  const u64 hd_all = _pdep_u64(hc, pp), seq_all = _pdep_u64(hc & (pm << 1), pp);
+  u64 seq_all;
+  const u64 hd_all = ddport::run_heads(H[cur], allx, &seq_all);
   auto generate = [&](int l) {
     u64 hd = hd_all & LANE(l);
     while (hd) {
@@ -1110,9 +1187,8 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
   const u64 hl = H[L], hp = H[P], ha = H[A], hb = H[B];
   const bool trumps = !NT && (all & TRL);  // DDS uses the no-trump weights once no trump is left
   const u64 kc = S->killer[n][0] & hl;
-  const u64 pp = all | GUARD;
-  const u64 pm = _pext_u64(hl, pp), hc = pm & ~(pm >> 1);
-  const u64 hd_all = _pdep_u64(hc, pp), seq_all = _pdep_u64(hc & (pm << 1), pp);
+  u64 seq_all;
+  const u64 hd_all = ddport::run_heads(hl, all, &seq_all);
   const u64 tP = hp & TRL, tA = ha & TRL, tB = hb & TRL;
   int nm = 0;
   for (int l = 0; l < 4; l++) {
@@ -1227,6 +1303,142 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
   return nm;
 }
 
+#if DDCLAIM_ARM
+// native_order for NEON: the per-suit part as in the AVX-512 version below (one 32-bit lane
+// per suit, masks as all-ones lanes), then a branch-free scalar loop over the cards, which
+// looks up each card's class in per-suit tables (in place of AVX-512's compress and permutes).
+template <bool NT>
+inline int native_order_neon(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
+  using V = int32x4_t;
+  using M = uint32x4_t;
+  constexpr u64 TRL = LANE(3);
+  const int P = L ^ 2, A = (L + 1) & 3, B = (L + 3) & 3;
+  const u64 hl = H[L], hp = H[P], ha = H[A], hb = H[B];
+  const bool trumps = !NT && (all & TRL);
+  const u64 kc = S->killer[n][0] & hl;
+  u64 seq_all;
+  const u64 hd_all = ddport::run_heads(hl, all, &seq_all);
+  auto vs = [](int x) { return vdupq_n_s32(x); };
+  auto ld = [](u64 h) { return vreinterpretq_s32_u32(vmovl_u16(vcreate_u16(h))); };
+  auto hib = [](V v) {  // the highest bit of each lane (0 for 0)
+    const int32x4_t sh = vnegq_s32(vreinterpretq_s32_u32(vclzq_u32(vreinterpretq_u32_s32(v))));
+    return vreinterpretq_s32_u32(vshlq_u32(vdupq_n_u32(0x80000000u), sh));
+  };
+  auto sel = [](M m, V a, V b) { return vbslq_s32(m, a, b); };  // m ? a : b
+  auto eq = [](V a, int k) { return vceqq_s32(a, vdupq_n_s32(k)); };
+  auto tst = [](V a, V b) { return vtstq_s32(a, b); };
+  auto pc = [](V v) { return vreinterpretq_s32_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_s32(v)))); };
+  auto mk = [](bool b) { return vdupq_n_u32(b ? ~0u : 0u); };
+  auto add = [](V a, int k) { return vaddq_s32(a, vdupq_n_s32(k)); };
+  auto div = [](V a, int mul) { return vreinterpretq_s32_u32(vshrq_n_u32(vreinterpretq_u32_s32(vmulq_s32(a, vdupq_n_s32(mul))), 18)); };
+  const V X = ld(all), VL = ld(hl), VP = ld(hp), VA = ld(ha), VB = ld(hb);
+  // Lane popcounts: the per-16-bit sums of the byte counts (the high halves are zero).
+  const V lenA = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VA))));
+  const V lenB = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VB))));
+  const V lenP = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VP))));
+  const V top1 = hib(X), X2 = veorq_s32(X, top1), top2 = hib(X2), top3 = hib(veorq_s32(X2, top2));
+  const M w1L = tst(top1, VL), w1P = tst(top1, VP), w1A = tst(top1, VA), w1B = tst(top1, VB);
+  const M w2L = tst(top2, VL), w2P = tst(top2, VP), w2A = tst(top2, VA), w2B = tst(top2, VB);
+  const M h3L = tst(top3, VL), h3P = tst(top3, VP);
+  const M lA0 = eq(lenA, 0), lB0 = eq(lenB, 0), lP0 = eq(lenP, 0), lA1 = eq(lenA, 1), lB1 = eq(lenB, 1), lP1 = eq(lenP, 1);
+  const M lPg1 = vcgtq_s32(lenP, vs(1));
+  const M sing = (lA1 & w1A) | (lB1 & w1B);
+  const M p_over = vcgtq_u32(vreinterpretq_u32_s32(VP), vreinterpretq_u32_s32(vorrq_s32(VA, VB)));
+  const M third13 = ((w2L & h3P) | (w2P & h3L)) & lPg1;
+  const V cAB = vshlq_n_s32(vaddq_s32(vshlq_n_s32(sel(lA0, vs(n), lenA), 2), vshlq_n_s32(sel(lB0, vs(n), lenB), 2)), 5);
+  V B0, B1, B2, B3, R0, R1, R2, R3, K2, K3, HW, HN, KW, KN;
+  M W0, Wo;
+  const V zero = vs(0), one = vs(1);
+  if (trumps) {
+    const M side = {~0u, ~0u, ~0u, 0u};
+    const M mtA = mk(ha & TRL), mtB = mk(hb & TRL), mtP = mk(hp & TRL);
+    const u64 tP = hp & TRL, tA = ha & TRL, tB = hb & TRL;
+    const M mPA = mk(tP > tA), mPB = mk(tP > tB), mPAB = mk(tP > (tA | tB));
+    const M ra = lA0 & mtA, rb = lB0 & mtB;
+    V bonus = sel(side & (ra | rb), vs(-12), zero);
+    bonus = vaddq_s32(bonus, sel(side & lP0 & mtP & ~lB0, vs(17), zero));
+    const M wB = w1B | w2B;
+    bonus = vaddq_s32(bonus, sel(wB & ~lB1, vs(-12), sel(~wB & w1A & w2P & ~lP1, vs(27), zero)));
+    const V lenL = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VL))));
+    const M lL1 = eq(lenL, 1);
+    bonus = vaddq_s32(bonus, sel(side & lL1 & mk(hl & TRL) & lPg1 & w1P, vs(19), zero));
+    const V swd = vsubq_s32(bonus, div(cAB, 20165));  // /13
+    const M opp_follow = ~ra & ~rb;
+    const M m1 = ~lP0 | ~mtP;
+    const M wt_side = (m1 & opp_follow) | (~m1 & (~lA0 | mPA) & (~lB0 | mPB));
+    W0 = ~side | wt_side;
+    const M rcase = (ra & rb & mPAB) | (ra & ~rb & mPA) | (~ra & rb & mPB) | (~ra & ~rb);
+    const M wo_side = (p_over & opp_follow) | (~p_over & lP0 & mtP & rcase);
+    Wo = (~side & p_over) | (side & wo_side);
+    const V d2 = vaddq_s32(swd, sel(w2P & h3P, vs(20), sel(third13, vs(13), zero)));
+    B0 = sel(W0, sel(w2P, add(swd, 48), add(swd, 31)), sel(w2P, add(d2, 33), add(d2, 38)));
+    R0 = sel(w2P, one, zero);
+    const M Sm = sing | w1L | w1P;
+    const V BSw = sel(sing, add(swd, 35), sel(w1L, sel(w2P, add(swd, 48), add(swd, -3)), sel(w2L, add(swd, 42), add(swd, 28))));
+    const V BSn = sel(sing, add(d2, 2), sel(w1L, sel(w2P, add(d2, 33), add(d2, -14)), add(d2, 34)));
+    const V BS = sel(Wo, BSw, BSn);
+    B1 = sel(Sm, BS, sel(Wo, add(swd, 40), add(d2, 35)));
+    R1 = sel(Sm, one, zero);
+    B2 = sel(Sm, BS, sel(Wo, add(swd, 22), add(d2, 17)));
+    B3 = sel(Sm, BS, sel(Wo, add(swd, 11), add(d2, 17)));
+    R2 = R3 = sel(Sm | Wo, one, zero);
+    K2 = K3 = sel(Sm | Wo, zero, vs(-1));
+    HW = vs(55 + HX), HN = vs(18 + HX), KW = vs(18), KN = zero;
+  } else {
+    const V swd = vsubq_s32(sel(lP0, vs(-9), zero), div(cAB, 13798));  // /19
+    const V dw = vaddq_s32(swd, sel(w2B, sel(lB1, zero, vs(-1)), sel(w2A, sel(lA1, vs(16), vs(22)), zero)));
+    const V addw = sel((~w2A | lA1) & (~w2B | lB1), vs(45), vs(18));
+    V dn = vaddq_s32(swd, sel(w1B | w2B, sel(lB1, zero, vs(-10)), sel(w1A & w2P, sel(lP1, zero, vs(31)), zero)));
+    dn = vaddq_s32(dn, sel(w2P & h3P, vs(35), sel(third13, vs(25), zero)));
+    const V bw = vaddq_s32(dw, addw);
+    W0 = vdupq_n_u32(~0u), Wo = p_over;
+    const M Sm = sing | w1L;
+    const V Snt = sel(sing, add(dn, 28), add(dn, -17));
+    B0 = bw, R0 = one;
+    B1 = sel(p_over, bw, sel(Sm, Snt, add(dn, 48)));
+    R1 = sel(p_over | Sm, one, zero);
+    B2 = sel(p_over, bw, sel(Sm, Snt, add(dn, 29)));
+    R2 = sel(p_over | Sm, one, vs(-1));
+    B3 = sel(p_over, bw, sel(Sm, Snt, add(dn, 12)));
+    R3 = one;
+    K2 = K3 = zero;
+    HW = vs(126 + HX), HN = vs(47 + HX), KW = vs(32), KN = vs(19);
+  }
+  // Per class (top card, second card heading a sequence, other sequence head, other card) and
+  // suit: base weight, coefficients on rr and on rank, hint and killer bonuses.
+  alignas(16) int32_t tb[16], tr[16], tk[16], th[16], tkb[16];
+  const V c2000 = vs(2000);
+  vst1q_s32(tb, vaddq_s32(B0, c2000)), vst1q_s32(tb + 4, vaddq_s32(B1, c2000));
+  vst1q_s32(tb + 8, vaddq_s32(B2, c2000)), vst1q_s32(tb + 12, vaddq_s32(B3, c2000));
+  vst1q_s32(tr, R0), vst1q_s32(tr + 4, R1), vst1q_s32(tr + 8, R2), vst1q_s32(tr + 12, R3);
+  vst1q_s32(tk, zero), vst1q_s32(tk + 4, zero), vst1q_s32(tk + 8, K2), vst1q_s32(tk + 12, K3);
+  const V hO = sel(Wo, HW, HN), kO = sel(Wo, KW, KN);
+  vst1q_s32(th, sel(W0, HW, HN)), vst1q_s32(th + 4, hO), vst1q_s32(th + 8, hO), vst1q_s32(th + 12, hO);
+  vst1q_s32(tkb, sel(W0, KW, KN)), vst1q_s32(tkb + 4, kO), vst1q_s32(tkb + 8, kO), vst1q_s32(tkb + 12, kO);
+  int nm = 0;
+  for (int l = 0; l < 4; l++) {
+    u64 h = hd_all & LANE(l);
+    const u64 x = all & LANE(l);
+    while (h) {
+      const int b = 63 - __builtin_clzll(h);
+      const u64 c = 1ull << b;
+      h ^= c;
+      const int rr = popc(x >> b);  // c and the cards above it
+      const int sq = int(seq_all >> b) & 1;
+      const int cls = rr == 1 ? 0 : sq ? (rr == 2 ? 1 : 2) : 3;
+      const int idx = 4 * cls + l;
+      int w = tb[idx] + tr[idx] * rr + tk[idx] * ((b & 15) + 2);
+      w += c == hint ? th[idx] : c == kc ? tkb[idx] : 0;
+      w = w < 0 ? 0 : w > 4095 ? 4095 : w;
+      cards[nm] = c;
+      key[nm] = uint16_t(w * 16 + (15 - nm));
+      nm++;
+    }
+  }
+  return nm;
+}
+#endif
+
 // native_order with the per-suit work done for all four suits at once (one 32-bit vector
 // lane per suit): for each suit and card class (top card, second card heading a sequence,
 // other sequence head, other card) a base weight, its coefficients on rr and rank, and the
@@ -1234,9 +1446,11 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
 // native_order_scalar.
 template <bool NT>
 inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
-#ifdef OLD_ORDER
+#if defined(OLD_ORDER)
   return native_order_scalar<NT>(n, L, hint, all, cards, key);
-#endif
+#elif DDCLAIM_ARM
+  return native_order_neon<NT>(n, L, hint, all, cards, key);
+#else
   using V = __m128i;
   using M = __mmask8;
   constexpr u64 TRL = LANE(3);
@@ -1244,9 +1458,8 @@ inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* k
   const u64 hl = H[L], hp = H[P], ha = H[A], hb = H[B];
   const bool trumps = !NT && (all & TRL);
   const u64 kc = S->killer[n][0] & hl;
-  const u64 pp = all | GUARD;
-  const u64 pm = _pext_u64(hl, pp), hc = pm & ~(pm >> 1);
-  const u64 hd_all = _pdep_u64(hc, pp), seq_all = _pdep_u64(hc & (pm << 1), pp);
+  u64 seq_all;
+  const u64 hd_all = ddport::run_heads(hl, all, &seq_all);
   auto vs = [](int x) { return _mm_set1_epi32(x); };
   auto ld = [](u64 h) { return _mm_cvtepu16_epi32(_mm_cvtsi64_si128((long long)h)); };
   auto hib = [](V v) { return _mm_srlv_epi32(_mm_set1_epi32(int(0x80000000u)), _mm_lzcnt_epi32(v)); };
@@ -1364,6 +1577,7 @@ inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* k
   _mm512_store_si512(cards, _mm512_maskz_sllv_epi64(__mmask8(live), one64, _mm512_cvtepu32_epi64(_mm512_castsi512_si256(pos))));
   _mm512_store_si512(cards + 8, _mm512_maskz_sllv_epi64(__mmask8(live >> 8), one64, _mm512_cvtepu32_epi64(_mm512_extracti64x4_epi64(pos, 1))));
   return nm;
+#endif
 }
 
 // DDS's QuickTricksSecondHand on the hand words: can the second hand's side win this trick
@@ -1420,11 +1634,7 @@ inline bool native_second(int s, u64 lc, int need, u64& R) {
 
 // The live card with the highest key (earliest among equals).
 inline u64 pick_best(const u64* cards, const uint16_t* key, u64 cand) {
-  const __mmask16 live = __mmask16(_mm512_test_epi64_mask(_mm512_load_si512(cards), _mm512_set1_epi64((long long)cand)) |
-                                   _mm512_test_epi64_mask(_mm512_load_si512(cards + 8), _mm512_set1_epi64((long long)cand)) << 8);
-  const __m256i kv = _mm256_maskz_mov_epi16(live, _mm256_load_si256((const __m256i*)key));
-  const __m128i mx = _mm_max_epu16(_mm256_castsi256_si128(kv), _mm256_extracti128_si256(kv, 1));
-  const unsigned bk = 0xFFFF - unsigned(_mm_extract_epi16(_mm_minpos_epu16(_mm_xor_si128(mx, _mm_set1_epi16(-1))), 0));
+  const unsigned bk = ddport::best_key(cards, key, cand);
   return cards[15 - (bk & 15)];
 }
 
@@ -1453,13 +1663,13 @@ struct Cfg {
 // Count of the consecutive top cards of `lane` held by `mine` (subset of xs), and those cards.
 inline int tops(u64 ml, u64 xs, u64& topset) {
   u64 oth = xs ^ ml;
-  topset = ml & ~((1ull << (64 - _lzcnt_u64(oth))) - 1);  // above the highest other card
+  topset = ml & ~((1ull << (64 - ddport::clz64(oth))) - 1);  // above the highest other card
   return popc(topset);
 }
 
 // The j-th highest card of `set` and above (j >= 1, j <= popcount).
 inline u64 top_j(u64 set, int j) {
-  return ge(_pdep_u64(1ull << (popc(set) - j), set));
+  return ge(ddport::pdep64(1ull << (popc(set) - j), set));
 }
 
 // Sure tricks the leader can cash at once. True if at least `need`; R gets the cards that matter.
@@ -1594,6 +1804,65 @@ u64 g_dup = 0;
 #ifndef TTPICK
 #define TTPICK 1
 #endif
+// Transposition-table block matching (8 entries a block). Narrow entries: e[0..7] the masked
+// values, e[8..15] the masks with the bounds bits; wide entries: e[0..7] the masks with the
+// bounds, e[8..15] and e[16..23] the two masked values.
+#if DDCLAIM_X86
+inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
+  const __m512i vb = _mm512_load_si512(e + 8);
+  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
+  return k & _mm512_test_epi64_mask(vb, _mm512_set1_epi64((long long)dec));
+}
+inline unsigned tt_match_wide(const u64* e, u64 ewq, u64 swq, int target) {
+  const __m512i vt = _mm512_set1_epi64(target);
+  const __m512i v0 = _mm512_load_si512(e);
+  const __m512i vm = _mm512_and_si512(v0, _mm512_set1_epi64((long long)W52));
+  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vm, _mm512_set1_epi64((long long)ewq)), _mm512_load_si512(e + 8)) &
+                     _mm512_cmpeq_epi64_mask(_mm512_and_si512(vm, _mm512_set1_epi64((long long)swq)), _mm512_load_si512(e + 16));
+  const __m512i vlo = _mm512_and_si512(_mm512_srli_epi64(v0, 52), _mm512_set1_epi64(15));
+  const __m512i vhi = _mm512_and_si512(_mm512_srli_epi64(v0, 56), _mm512_set1_epi64(15));
+  return k & (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));
+}
+// Among the entries in kd (two or more), the one whose mask (v[i] & m) has the fewest bits,
+// the earliest among equals: (popcount << 3 | index).
+inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
+  const __m512i pcv = _mm512_or_si512(_mm512_slli_epi64(_mm512_popcnt_epi64(_mm512_and_si512(_mm512_load_si512(v), _mm512_set1_epi64((long long)m))), 3),
+                                      _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
+  return _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
+}
+#else
+inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
+  const uint64x2_t vo = vdupq_n_u64(own), vd = vdupq_n_u64(dec);
+  uint64x2_t r[4];
+  for (int i = 0; i < 4; i++) {
+    const uint64x2_t vb = vld1q_u64(e + 8 + 2 * i);
+    r[i] = vandq_u64(vceqq_u64(vandq_u64(vb, vo), vld1q_u64(e + 2 * i)), vtstq_u64(vb, vd));
+  }
+  return ddport::movemask8x64(r[0], r[1], r[2], r[3]);
+}
+inline unsigned tt_match_wide(const u64* e, u64 ewq, u64 swq, int target) {
+  const uint64x2_t ve = vdupq_n_u64(ewq), vs = vdupq_n_u64(swq), vw = vdupq_n_u64(W52), vt = vdupq_n_u64(u64(target)), f = vdupq_n_u64(15);
+  uint64x2_t r[4];
+  for (int i = 0; i < 4; i++) {
+    const uint64x2_t v0 = vld1q_u64(e + 2 * i), vm = vandq_u64(v0, vw);
+    const uint64x2_t k = vandq_u64(vceqq_u64(vandq_u64(vm, ve), vld1q_u64(e + 8 + 2 * i)), vceqq_u64(vandq_u64(vm, vs), vld1q_u64(e + 16 + 2 * i)));
+    const uint64x2_t lo = vandq_u64(vshrq_n_u64(v0, 52), f), hi = vandq_u64(vshrq_n_u64(v0, 56), f);
+    r[i] = vandq_u64(k, vorrq_u64(vcgeq_u64(lo, vt), vcltq_u64(hi, vt)));
+  }
+  return ddport::movemask8x64(r[0], r[1], r[2], r[3]);
+}
+inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
+  u64 best = ~u64(0);
+  while (kd) {
+    const unsigned i = unsigned(__builtin_ctz(kd));
+    kd &= kd - 1;
+    const u64 c = u64(popc(v[i] & m)) << 3 | i;
+    best = c < best ? c : best;
+  }
+  return best;
+}
+#endif
+
 PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
   {
     const bool wide = n >= 8;
@@ -1602,8 +1871,7 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
     STAT(g_tnoslot[n] += !d0 && !wide);
     if (const DirSlot* d = d0) {
       const unsigned hb = unsigned(d->key >> 54) & 63;
-      if (hb < 52) hint = _pdep_u64(1ull << hb, all);
-      const __m512i vt = _mm512_set1_epi64(target);
+      if (hb < 52) hint = ddport::pdep64(1ull << hb, all);
 #ifdef STATS
       unsigned sb_any = 0; int sb_n = 0;
       struct SBEnd { unsigned& a; int n; bool w; bool done = false; ~SBEnd() { if (!done && !w) { g_tmiss[n]++; g_evict[n] += !a; } } } sb_end{sb_any, n, wide};
@@ -1613,25 +1881,20 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
       u64 gbb = 0;
 #endif
       if (!wide) {
-        const __m512i vo = _mm512_set1_epi64((long long)(ewq | swq << 28));
-        const __m512i vdec = _mm512_set1_epi64((long long)(1ull << (55 + target)));
+        const u64 own = ewq | swq << 28, dec = 1ull << (55 + target);
         for (uint32_t blk = d->head; blk != NIL; blk = tt.next[blk]) {
           STAT(g_blk[n]++);
           const u64* e = tt.pool + size_t(blk) * 8;
-          const __m512i vb = _mm512_load_si512(e + 8);
-          const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, vo), _mm512_load_si512(e));
-          const unsigned kd = k & _mm512_test_epi64_mask(vb, vdec);
-          STAT(sb_any |= _mm512_test_epi64_mask(vb, vdec) & ~_mm512_cmpeq_epi64_mask(_mm512_load_si512(e), _mm512_set1_epi64(-1)));
+          const unsigned kd = tt_match_narrow(e, own, dec);
+          STAT(for (int i_ = 0; i_ < 8; i_++) sb_any |= unsigned((e[8 + i_] & dec) && e[i_] != ~0ull) << i_);
           STAT(sb_n++);
           if (kd) {
             STAT(g_blkhit[n] += sb_n);
 #if TTPICK
-            const __m512i pcv = _mm512_or_si512(_mm512_slli_epi64(_mm512_popcnt_epi64(_mm512_and_si512(vb, _mm512_set1_epi64((long long)0xFFFFFFF))), 3),
-                                                _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
             unsigned bi = __builtin_ctz(kd);
             int bp = 0;
             if (TTPICK == 2 || (kd & (kd - 1))) {
-              const u64 mn = _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
+              const u64 mn = tt_min_pc(e + 8, 0xFFFFFFF, kd);
               bi = unsigned(mn & 7), bp = int(mn >> 3);
             }
             const u64 bb = e[8 + bi];
@@ -1642,37 +1905,28 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
             if (bp < gbp) gbp = bp, gbb = bb;
             continue;
 #endif
-            R = fill_up(_pdep_u64(bb & 0xFFFFFFF, all));
+            R = fill_up(ddport::pdep64(bb & 0xFFFFFFF, all));
             STAT(sb_end.done = true);
             return bb >> 63;
           }
         }
 #if TTPICK == 2
         if (gbp < 99) {
-          R = fill_up(_pdep_u64(gbb & 0xFFFFFFF, all));
+          R = fill_up(ddport::pdep64(gbb & 0xFFFFFFF, all));
           return gbb >> 63;
         }
 #endif
       } else {
-        const __m512i ve = _mm512_set1_epi64((long long)ewq), vs = _mm512_set1_epi64((long long)swq);
         for (uint32_t blk = d->head; blk != NIL; blk = tt.next[blk]) {
           STAT(g_blk[n]++);
           const u64* e = tt.pool + size_t(blk) * 8;
-          const __m512i v0 = _mm512_load_si512(e);
-          const __m512i vm = _mm512_and_si512(v0, _mm512_set1_epi64((long long)W52));
-          const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vm, ve), _mm512_load_si512(e + 8)) &
-                             _mm512_cmpeq_epi64_mask(_mm512_and_si512(vm, vs), _mm512_load_si512(e + 16));
-          const __m512i vlo = _mm512_and_si512(_mm512_srli_epi64(v0, 52), _mm512_set1_epi64(15));
-          const __m512i vhi = _mm512_and_si512(_mm512_srli_epi64(v0, 56), _mm512_set1_epi64(15));
-          const unsigned kd = k & (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));
+          const unsigned kd = tt_match_wide(e, ewq, swq, target);
           if (kd) {
 #if TTPICK
-            const __m512i pcv = _mm512_or_si512(_mm512_slli_epi64(_mm512_popcnt_epi64(_mm512_and_si512(v0, _mm512_set1_epi64((long long)W52))), 3),
-                                                _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
             unsigned bi = __builtin_ctz(kd);
             int bp = 0;
             if (TTPICK == 2 || (kd & (kd - 1))) {
-              const u64 mn = _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
+              const u64 mn = tt_min_pc(e, W52, kd);
               bi = unsigned(mn & 7), bp = int(mn >> 3);
             }
             const u64 bb = e[bi];
@@ -1683,13 +1937,13 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
             if (bp < gbp) gbp = bp, gbb = bb;
             continue;
 #endif
-            R = fill_up(_pdep_u64(bb & W52, all));
+            R = fill_up(ddport::pdep64(bb & W52, all));
             return (int(bb >> 52) & 15) >= target;
           }
         }
 #if TTPICK == 2
         if (gbp < 99) {
-          R = fill_up(_pdep_u64(gbb & W52, all));
+          R = fill_up(ddport::pdep64(gbb & W52, all));
           return (int(gbb >> 52) & 15) >= target;
         }
 #endif
@@ -1733,8 +1987,9 @@ int etc_probe(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, int
       else if (nt > n - 1) r = 0;
       else {
         const u64 al = H[0] | H[1] | H[2] | H[3];
-        const u64 ewq = _pext_u64(H[1] | H[3], al), swq = _pext_u64(H[2] | H[3], al);
-        const u64 key54 = _pext_u64(LENS, 0xFFF0FFF0FFF0FFF0ull) | u64(nbw) << 48 | u64(n - 1) << 50;
+        const ddport::BitMask bm_(al);
+        const u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);
+        const u64 key54 = lens48(LENS) | u64(nbw) << 48 | u64(n - 1) << 50;
         u64 hint = 0, R = 0;
         g_etc_look++;
         r = tt_lookup(n - 1, nt, al, ewq, swq, key54, hint, R);
@@ -1759,7 +2014,6 @@ struct EtcPrint { ~EtcPrint() {
 // Root leads: what each lead cost to refute in the last question at the root, when every lead
 // failed there (cycles). The next question (one trick lower) tries the costliest first.
 thread_local u64 g_rcost[64];
-thread_local bool g_expfalse = false;
 
 #ifndef ETCSIDE
 #define ETCSIDE 1
@@ -1776,7 +2030,6 @@ thread_local bool g_expfalse = false;
 #define MEMCOST 1
 #endif
 #if defined(MEMN) && MEMCOST
-thread_local u64 g_mnodes = 0;
 #define MEMTICK() (g_mnodes++)
 #define MEMNOW() g_mnodes
 #else
@@ -1801,7 +2054,6 @@ thread_local u64 g_mnodes = 0;
 #ifndef ROOTALLMODE
 #define ROOTALLMODE 0
 #endif
-thread_local bool g_rvalid = false;
 #ifdef ORACLE
 std::unordered_map<u64, u64> g_or;
 u64 g_pass_nodes[4];
@@ -1889,16 +2141,15 @@ struct STPrint { ~STPrint() { fprintf(stderr, "selftest checks %llu\n", (unsigne
 #ifndef ETCF
 #define ETCF 99  // and from this many cards, if that is not stored, every other card's position
 #endif
-thread_local bool g_skiptt = false;  // the next lead node's table lookup is known to miss
-thread_local u64 g_skiphint = 0;     // and this is the hint it would have found
 // Looks up the position after a complete trick (H and LENS already updated) in the table.
 inline int probe_after(int n1, int nbw, int nt, u64& R, u64& hint) {
   if (nt <= 0) { R = 0; return 1; }
   if (nt > n1) { R = 0; return 0; }
   if (n1 < TT_MIN) return -1;
   const u64 all = H[0] | H[1] | H[2] | H[3];
-  const u64 ewq = _pext_u64(H[1] | H[3], all), swq = _pext_u64(H[2] | H[3], all);
-  const u64 key54 = _pext_u64(LENS, 0xFFF0FFF0FFF0FFF0ull) | u64(nbw) << 48 | u64(n1) << 50;
+  const ddport::BitMask bm_(all);
+  const u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);
+  const u64 key54 = lens48(LENS) | u64(nbw) << 48 | u64(n1) << 50;
   return tt_lookup(n1, nt, all, ewq, swq, key54, hint, R);
 }
 template <bool NT>
@@ -1928,7 +2179,6 @@ struct Snap {
     memcpy(st.killer, killer, sizeof killer);
   }
 };
-thread_local int g_snapdepth = 0;
 #endif
 template <bool NT>
 bool lead(int n, int L, int target, u64& R) {
@@ -1962,8 +2212,9 @@ bool lead(int n, int L, int target, u64& R) {
   const bool dq = n >= DMIN;
   // Table.
   const bool wide = n >= 8;
-  const u64 ewq = _pext_u64(H[1] | H[3], all), swq = _pext_u64(H[2] | H[3], all);
-  const u64 key54 = _pext_u64(LENS, 0xFFF0FFF0FFF0FFF0ull) | u64(L) << 48 | u64(n) << 50;
+  const ddport::BitMask bm_(all);
+  const u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);
+  const u64 key54 = lens48(LENS) | u64(L) << 48 | u64(n) << 50;
   u64 hint = 0;
   STAT(g_ttlook++);
 #if ETC1 <= 13
@@ -1995,11 +2246,11 @@ bool lead(int n, int L, int target, u64& R) {
       tt.used += lines;
       u64* e = tt.pool + size_t(blk) * 8;
       if (wide) {
-        _mm512_store_si512(e, _mm512_setzero_si512());
-        _mm512_store_si512(e + 8, _mm512_set1_epi64(-1));
+        memset(e, 0, 64);
+        memset(e + 8, 0xFF, 64);
       } else {
-        _mm512_store_si512(e, _mm512_set1_epi64(-1));
-        _mm512_store_si512(e + 8, _mm512_setzero_si512());
+        memset(e, 0xFF, 64);
+        memset(e + 8, 0, 64);
       }
       tt.next[blk] = d->head;
       d->head = blk;
@@ -2007,7 +2258,7 @@ bool lead(int n, int L, int target, u64& R) {
     }
     STAT(g_store[n]++);
     u64* e = tt.pool + size_t(d->head) * 8;
-    const u64 m = _pext_u64(Racc, all);
+    const u64 m = ddport::pext64(Racc, all);
     const u64 elo = res ? u64(target) : 0, ehi = res ? u64(n) : u64(target - 1);
     if (wide) {
       e[cnt] = m | elo << 52 | ehi << 56;
@@ -2290,11 +2541,7 @@ bool lead(int n, int L, int target, u64& R) {
 #endif
   while (cand) {
     // The best remaining card (highest score, then earliest), chosen without branches.
-    const __mmask16 live = __mmask16(_mm512_test_epi64_mask(_mm512_load_si512(cards), _mm512_set1_epi64((long long)cand)) |
-                                     _mm512_test_epi64_mask(_mm512_load_si512(cards + 8), _mm512_set1_epi64((long long)cand)) << 8);
-    const __m256i kv = _mm256_maskz_mov_epi16(live, _mm256_load_si256((const __m256i*)key));
-    const __m128i mx = _mm_max_epu16(_mm256_castsi256_si128(kv), _mm256_extracti128_si256(kv, 1));
-    const unsigned bk = 0xFFFF - unsigned(_mm_extract_epi16(_mm_minpos_epu16(_mm_xor_si128(mx, _mm_set1_epi16(-1))), 0));
+    const unsigned bk = ddport::best_key(cards, key, cand);
     const u64 c = cards[15 - (bk & 15)];
     cand ^= c;
     triedm |= c;
@@ -2448,7 +2695,7 @@ inline u64 min_rank(u64 cand) {
   int br = 99;
   for (int l = 0; l < 4; l++) {
     const u64 x = cand & LANE(l);
-    const int r = x ? int(_tzcnt_u64(x)) & 15 : 99;
+    const int r = x ? int(ddport::ctz64(x)) & 15 : 99;
     const bool lower = r < br;
     br = lower ? r : br;
     best = lower ? lowest(x) : best;
@@ -2812,7 +3059,7 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
           int w = bw;
           bool rk = ranked;
           trick_step<NT>(c, s, b, w, rk);
-          S->tt.prefetch(_pext_u64(LENS - (1ull << (16 * s + 4 * suit_of(c))), 0xFFF0FFF0FFF0FFF0ull) | u64(w) << 48 | u64(n - 1) << 50);
+          S->tt.prefetch(lens48(LENS - (1ull << (16 * s + 4 * suit_of(c)))) | u64(w) << 48 | u64(n - 1) << 50);
         }
 #endif
       for (; cc; cc &= cc - 1) {
@@ -3130,7 +3377,7 @@ inline int guess(int n, int L) {
     int e = 0;
     for (int l = 0; l < 4; l++) {
       const unsigned x = unsigned(all >> (16 * l)) & 0x1FFF;
-      const unsigned pm = _pext_u32(unsigned(side >> (16 * l)) & 0x1FFF, x);
+      const unsigned pm = ddport::pext32(unsigned(side >> (16 * l)) & 0x1FFF, x);
       const unsigned pat = ((pm << (16 - popc(x))) >> 12) & 15;  // the top four cards, highest in bit 3
       const unsigned c0 = unsigned(rot >> (4 * l)) & 15, c1 = unsigned(rot >> (16 + 4 * l)) & 15;
       const unsigned c2 = unsigned(rot >> (32 + 4 * l)) & 15, c3 = unsigned(rot >> (48 + 4 * l)) & 15;
@@ -3231,30 +3478,7 @@ int solve_one(int n, int L, int first) {
 // Coroutines: several positions are searched in turn on one thread. A search that needs a
 // three-card table entry prefetches it and hands over to the next search, so the memory
 // access is over by the time it resumes.
-extern "C" void ddfast_ctx_switch(void** save_sp, void* load_sp);
-asm(R"(
-.text
-.p2align 4
-.globl ddfast_ctx_switch
-.type ddfast_ctx_switch,@function
-ddfast_ctx_switch:
-  pushq %rbp
-  pushq %rbx
-  pushq %r12
-  pushq %r13
-  pushq %r14
-  pushq %r15
-  movq %rsp, (%rdi)
-  movq %rsi, %rsp
-  popq %r15
-  popq %r14
-  popq %r13
-  popq %r12
-  popq %rbx
-  popq %rbp
-  ret
-.size ddfast_ctx_switch, .-ddfast_ctx_switch
-)");
+DDPORT_DEFINE_CTX_SWITCH(ddfast_ctx_switch)
 
 constexpr int MAX_CTX = 64;
 constexpr size_t STACK_BYTES = 256 << 10;
@@ -3383,10 +3607,7 @@ void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks
     Ctx& c = g_ctx[i];
     c.next = (i + 1) % nctx;
     c.prev = (i + nctx - 1) % nctx;
-    void** top = reinterpret_cast<void**>(g_stacks + (i + 1) * STACK_BYTES);
-    top[-2] = reinterpret_cast<void*>(&ctx_main);  // the return address, 16-byte aligned
-    for (int k = 3; k <= 8; k++) top[-k] = nullptr;
-    c.sp = top - 8;
+    c.sp = ddport::init_stack(g_stacks + (i + 1) * STACK_BYTES, &ctx_main);
     c.ss = &g_sstates[i];
     if (!c.ss->tt.dir) c.ss->tt.alloc();
     save_state(c);

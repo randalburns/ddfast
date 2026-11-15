@@ -64,10 +64,11 @@ int main(int argc, char** argv) {
     return wrong ? 1 : 0;
   }
   const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
+  const long long cyc0 = perf_read(fc), ins0 = perf_read(fi);
   const double t0 = now();
   ddfast::solve(s.problems.data(), n, got.data());
   const double secs = now() - t0;
-  const long long cyc = perf_read(fc), ins = perf_read(fi);
+  const long long cyc = cyc0 < 0 ? -1 : perf_read(fc) - cyc0, ins = ins0 < 0 ? -1 : perf_read(fi) - ins0;
   if (cyc >= 0 && ins >= 0) printf("cycles/deal %.0f  instructions/deal %.0f\n", double(cyc) / n, double(ins) / n);
   size_t wrong = 0;
   for (size_t i = 0; i < n; i++) {

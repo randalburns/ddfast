@@ -18,8 +18,12 @@
 #include "ddclaim.hpp"
 #include "internal.hpp"
 
+#if defined(__linux__)
 #include <linux/perf_event.h>
 #include <sys/syscall.h>
+#else
+#include <sys/sysctl.h>
+#endif
 #include <unistd.h>
 
 namespace ddfast {
@@ -34,7 +38,13 @@ inline ddclaim::Position to_position(const Problem& p) {
   return q;
 }
 
-// A counter of the calling thread's user-mode events, or -1.
+// A counter of the calling thread's user-mode events, or -1 (always -1 off Linux: the
+// WorkerStats counters then stay 0).
+#if !defined(__linux__)
+enum { PERF_TYPE_HARDWARE, PERF_TYPE_HW_CACHE, PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_BRANCH_MISSES,
+       PERF_COUNT_HW_CACHE_MISSES, PERF_COUNT_HW_CACHE_DTLB = 0, PERF_COUNT_HW_CACHE_OP_READ = 0, PERF_COUNT_HW_CACHE_RESULT_MISS = 0 };
+int perf_open(uint64_t, uint32_t = 0) { return -1; }
+#else
 int perf_open(uint64_t config, uint32_t type = PERF_TYPE_HARDWARE) {
   perf_event_attr a{};
   a.type = type;
@@ -44,6 +54,7 @@ int perf_open(uint64_t config, uint32_t type = PERF_TYPE_HARDWARE) {
   a.exclude_hv = 1;
   return int(syscall(SYS_perf_event_open, &a, 0, -1, -1, 0));
 }
+#endif
 double perf_read(int fd) {
   uint64_t v = 0;
   return fd >= 0 && read(fd, &v, sizeof v) == sizeof v ? double(v) : 0.0;
@@ -232,6 +243,17 @@ void solve_tables_parallel(const Deal* deals, size_t n, Table* tables, const int
 }
 
 std::vector<int> available_cpus(bool smt) {
+#if defined(__APPLE__)
+  // No pinning on macOS (workers ask for the performance cores by QoS instead), so these are
+  // just worker slots: the performance cores first, then the efficiency cores.
+  (void)smt;
+  int n = 0;
+  size_t len = sizeof n;
+  if (sysctlbyname("hw.logicalcpu", &n, &len, nullptr, 0) != 0 || n < 1) n = int(std::thread::hardware_concurrency());
+  std::vector<int> v(size_t(n > 0 ? n : 1));
+  std::iota(v.begin(), v.end(), 0);
+  return v;
+#else
   cpu_set_t set;
   CPU_ZERO(&set);
   if (sched_getaffinity(0, sizeof set, &set) != 0) return {};
@@ -256,6 +278,7 @@ std::vector<int> available_cpus(bool smt) {
   std::vector<int> v;
   for (auto& c : cs) v.push_back(c.cpu);
   return v;
+#endif
 }
 
 void stop_pool() { pool().stop(); }
