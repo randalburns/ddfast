@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One Word per Hand</title>
+<style>
+/* Layout: one reading column (~68ch) with figures and code allowed to run wider; tables scroll inside their own box. */
+:root {
+  --bg: #f5f7f4;
+  --surface: #ffffff;
+  --fg: #18201c;
+  --muted: #59665f;
+  --rule: #d5ddd7;
+  --accent: #1d6b55;      /* card-present bits, links */
+  --accent-soft: #d4ebe2;
+  --on-accent: #ffffff;
+  --red: #b5302a;          /* hearts and diamonds */
+  --guard: #9a6a12;
+  --code-bg: #eef2ee;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111613; --surface: #18201b; --fg: #e3ebe5; --muted: #9aa9a0; --rule: #2c3830;
+    --accent: #5cc4a2; --accent-soft: #1f3a30; --on-accent: #0c1410; --red: #f07a70; --guard: #e0b052; --code-bg: #1a231e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111613; --surface: #18201b; --fg: #e3ebe5; --muted: #9aa9a0; --rule: #2c3830;
+  --accent: #5cc4a2; --accent-soft: #1f3a30; --on-accent: #0c1410; --red: #f07a70; --guard: #e0b052; --code-bg: #1a231e;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.65 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 8px; }
+main > * { min-width: 0; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(2rem, 5vw, 2.8rem); margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.5rem; margin: 40px 0 4px; padding-top: 16px; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.1rem; margin: 24px 0 0; }
+p, li { max-width: 68ch; }
+p { margin: 8px 0; }
+.lede { font-size: 1.12rem; color: var(--muted); }
+.eyebrow { font: 600 0.75rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+pre { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+pre code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.55; }
+.src { font: 0.75rem var(--font-mono); color: var(--muted); margin: -4px 0 12px; }
+.red { color: var(--red); fill: var(--red); }
+figure { margin: 16px 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; }
+.figscroll { overflow-x: auto; }
+figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; max-width: 68ch; }
+svg.diag { display: block; width: 100%; min-width: 520px; height: auto; color: var(--fg); }
+svg .lbl { font: 12px var(--font-body); fill: var(--fg); }
+svg .lblb { font: 600 12px var(--font-body); fill: var(--fg); }
+svg .lblb.red, svg .lbl.red { fill: var(--red); }
+svg .tiny { font: 10px var(--font-mono); fill: var(--muted); }
+svg .mono { font: 600 13px var(--font-mono); fill: var(--fg); }
+svg .op { font: 600 12px var(--font-mono); fill: var(--accent); }
+svg .cl { font: 600 12px var(--font-mono); }
+svg rect.off { fill: var(--surface); stroke: var(--rule); }
+svg rect.un { fill: var(--code-bg); stroke: var(--rule); stroke-dasharray: 2 2; }
+svg rect.on { fill: var(--accent); stroke: var(--accent); }
+svg rect.pr { fill: var(--accent-soft); stroke: var(--accent); }
+svg rect.gd { fill: var(--surface); stroke: var(--guard); stroke-width: 1.5; }
+svg rect.nib { fill: var(--accent-soft); stroke: var(--accent); }
+svg rect.nib.dim { fill: var(--surface); stroke: var(--rule); stroke-dasharray: 3 2; }
+svg .ont { fill: var(--on-accent); }
+svg .offt, svg .unt, svg .prt, svg .nibt { fill: var(--fg); }
+svg .gdt { fill: var(--guard); }
+svg .wire { fill: none; stroke: var(--rule); stroke-width: 1.2; }
+svg .wire.hot { stroke: var(--accent); stroke-width: 1.8; }
+.tablewrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; font-size: 0.9rem; min-width: 100%; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.72rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: var(--font-mono); font-size: 0.85rem; }
+.note { border-left: 3px solid var(--guard); padding: 4px 0 4px 12px; color: var(--muted); font-size: 0.92rem; }
+ul { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">ddfast &#183; ddclaim &#183; hand representation</div>
+  <h1>One Word per Hand</h1>
+  <p class="lede">In ddfast (an exact double-dummy solver, about four times faster than DDS on one core) and ddclaim (its sibling for endings of 1 to 7 cards), each bridge hand is a single 64-bit integer. Following suit, finding playable cards, deciding a trick and building table keys are each a few bit operations on four such words.</p>
+</header>
+
+<p>This page explains that representation well enough to reimplement it. Every excerpt is from the source: <code>ddclaim/include/ddclaim/tables.hpp</code> and <code>port.hpp</code> (the helpers, shared by both programs), and <code>ddfast/src/solver.cpp</code> (the search). The worked examples were checked by running the real helpers on the example hands. Figures come from <code>ddfast/README.md</code> and <code>ddfast/docs/NOTES.md</code>, and each one names its source.</p>
+
+<h2>The layout</h2>
+<p>The position is four hand words <code>H[4]</code>, indexed by seat (0 North, 1 East, 2 South, 3 West), plus a second word <code>LENS</code> that holds the suit lengths. Inside a hand word each suit gets a 16-bit lane. Bit <i>r</i> of a lane is rank 2&nbsp;+&nbsp;<i>r</i>, so the two is bit 0 and the ace is bit 12. Bits 13 and 14 are never set. Bit 15 is the <b>guard</b> bit. It is always zero in a hand, and the helpers set it in temporary values so that borrows and run detection stop at the edge of each suit.</p>
+
+<p>Example hand used throughout: North holds <b>&#9824;AKT95 <span class="red">&#9829;QJ3 &#9830;K7</span> &#9827;A64</b>.</p>
+
+<figure>
+<div class="figscroll"><svg viewBox="0 0 692 216" role="img" aria-label="North's hand as one 64-bit word: four 16-bit lanes, bits 0 to 12 hold the two to the ace, bits 13 and 14 unused, bit 15 the guard" class="diag"><text x="143.0" y="16" class="tiny" text-anchor="middle">15</text><text x="143.0" y="32" class="lblb" text-anchor="middle">G</text><text x="173.0" y="16" class="tiny" text-anchor="middle">14</text><text x="173.0" y="32" class="lblb" text-anchor="middle"></text><text x="203.0" y="16" class="tiny" text-anchor="middle">13</text><text x="203.0" y="32" class="lblb" text-anchor="middle"></text><text x="233.0" y="16" class="tiny" text-anchor="middle">12</text><text x="233.0" y="32" class="lblb" text-anchor="middle">A</text><text x="263.0" y="16" class="tiny" text-anchor="middle">11</text><text x="263.0" y="32" class="lblb" text-anchor="middle">K</text><text x="293.0" y="16" class="tiny" text-anchor="middle">10</text><text x="293.0" y="32" class="lblb" text-anchor="middle">Q</text><text x="323.0" y="16" class="tiny" text-anchor="middle">9</text><text x="323.0" y="32" class="lblb" text-anchor="middle">J</text><text x="353.0" y="16" class="tiny" text-anchor="middle">8</text><text x="353.0" y="32" class="lblb" text-anchor="middle">T</text><text x="383.0" y="16" class="tiny" text-anchor="middle">7</text><text x="383.0" y="32" class="lblb" text-anchor="middle">9</text><text x="413.0" y="16" class="tiny" text-anchor="middle">6</text><text x="413.0" y="32" class="lblb" text-anchor="middle">8</text><text x="443.0" y="16" class="tiny" text-anchor="middle">5</text><text x="443.0" y="32" class="lblb" text-anchor="middle">7</text><text x="473.0" y="16" class="tiny" text-anchor="middle">4</text><text x="473.0" y="32" class="lblb" text-anchor="middle">6</text><text x="503.0" y="16" class="tiny" text-anchor="middle">3</text><text x="503.0" y="32" class="lblb" text-anchor="middle">5</text><text x="533.0" y="16" class="tiny" text-anchor="middle">2</text><text x="533.0" y="32" class="lblb" text-anchor="middle">4</text><text x="563.0" y="16" class="tiny" text-anchor="middle">1</text><text x="563.0" y="32" class="lblb" text-anchor="middle">3</text><text x="593.0" y="16" class="tiny" text-anchor="middle">0</text><text x="593.0" y="32" class="lblb" text-anchor="middle">2</text><text x="8" y="58" class="lblb ">&#9827; clubs</text><text x="8" y="72" class="tiny" text-anchor="start">lane 3 &#183; bits 48&#8211;63</text><rect x="129" y="44" width="28" height="32" rx="3" class="gd"/><text x="143.0" y="64.0" class="cl gdt" text-anchor="middle">0</text><rect x="159" y="44" width="28" height="32" rx="3" class="un"/><rect x="189" y="44" width="28" height="32" rx="3" class="un"/><rect x="219" y="44" width="28" height="32" rx="3" class="on"/><text x="233.0" y="64.0" class="cl ont" text-anchor="middle">A</text><rect x="249" y="44" width="28" height="32" rx="3" class="off"/><rect x="279" y="44" width="28" height="32" rx="3" class="off"/><rect x="309" y="44" width="28" height="32" rx="3" class="off"/><rect x="339" y="44" width="28" height="32" rx="3" class="off"/><rect x="369" y="44" width="28" height="32" rx="3" class="off"/><rect x="399" y="44" width="28" height="32" rx="3" class="off"/><rect x="429" y="44" width="28" height="32" rx="3" class="off"/><rect x="459" y="44" width="28" height="32" rx="3" class="on"/><text x="473.0" y="64.0" class="cl ont" text-anchor="middle">6</text><rect x="489" y="44" width="28" height="32" rx="3" class="off"/><rect x="519" y="44" width="28" height="32" rx="3" class="on"/><text x="533.0" y="64.0" class="cl ont" text-anchor="middle">4</text><rect x="549" y="44" width="28" height="32" rx="3" class="off"/><rect x="579" y="44" width="28" height="32" rx="3" class="off"/><text x="620" y="65" class="mono" text-anchor="start">0x1014</text><text x="8" y="100" class="lblb red">&#9830; diamonds</text><text x="8" y="114" class="tiny" text-anchor="start">lane 2 &#183; bits 32&#8211;47</text><rect x="129" y="86" width="28" height="32" rx="3" class="gd"/><text x="143.0" y="106.0" class="cl gdt" text-anchor="middle">0</text><rect x="159" y="86" width="28" height="32" rx="3" class="un"/><rect x="189" y="86" width="28" height="32" rx="3" class="un"/><rect x="219" y="86" width="28" height="32" rx="3" class="off"/><rect x="249" y="86" width="28" height="32" rx="3" class="on"/><text x="263.0" y="106.0" class="cl ont" text-anchor="middle">K</text><rect x="279" y="86" width="28" height="32" rx="3" class="off"/><rect x="309" y="86" width="28" height="32" rx="3" class="off"/><rect x="339" y="86" width="28" height="32" rx="3" class="off"/><rect x="369" y="86" width="28" height="32" rx="3" class="off"/><rect x="399" y="86" width="28" height="32" rx="3" class="off"/><rect x="429" y="86" width="28" height="32" rx="3" class="on"/><text x="443.0" y="106.0" class="cl ont" text-anchor="middle">7</text><rect x="459" y="86" width="28" height="32" rx="3" class="off"/><rect x="489" y="86" width="28" height="32" rx="3" class="off"/><rect x="519" y="86" width="28" height="32" rx="3" class="off"/><rect x="549" y="86" width="28" height="32" rx="3" class="off"/><rect x="579" y="86" width="28" height="32" rx="3" class="off"/><text x="620" y="107" class="mono" text-anchor="start">0x0820</text><text x="8" y="142" class="lblb red">&#9829; hearts</text><text x="8" y="156" class="tiny" text-anchor="start">lane 1 &#183; bits 16&#8211;31</text><rect x="129" y="128" width="28" height="32" rx="3" class="gd"/><text x="143.0" y="148.0" class="cl gdt" text-anchor="middle">0</text><rect x="159" y="128" width="28" height="32" rx="3" class="un"/><rect x="189" y="128" width="28" height="32" rx="3" class="un"/><rect x="219" y="128" width="28" height="32" rx="3" class="off"/><rect x="249" y="128" width="28" height="32" rx="3" class="off"/><rect x="279" y="128" width="28" height="32" rx="3" class="on"/><text x="293.0" y="148.0" class="cl ont" text-anchor="middle">Q</text><rect x="309" y="128" width="28" height="32" rx="3" class="on"/><text x="323.0" y="148.0" class="cl ont" text-anchor="middle">J</text><rect x="339" y="128" width="28" height="32" rx="3" class="off"/><rect x="369" y="128" width="28" height="32" rx="3" class="off"/><rect x="399" y="128" width="28" height="32" rx="3" class="off"/><rect x="429" y="128" width="28" height="32" rx="3" class="off"/><rect x="459" y="128" width="28" height="32" rx="3" class="off"/><rect x="489" y="128" width="28" height="32" rx="3" class="off"/><rect x="519" y="128" width="28" height="32" rx="3" class="off"/><rect x="549" y="128" width="28" height="32" rx="3" class="on"/><text x="563.0" y="148.0" class="cl ont" text-anchor="middle">3</text><rect x="579" y="128" width="28" height="32" rx="3" class="off"/><text x="620" y="149" class="mono" text-anchor="start">0x0602</text><text x="8" y="184" class="lblb ">&#9824; spades</text><text x="8" y="198" class="tiny" text-anchor="start">lane 0 &#183; bits 0&#8211;15</text><rect x="129" y="170" width="28" height="32" rx="3" class="gd"/><text x="143.0" y="190.0" class="cl gdt" text-anchor="middle">0</text><rect x="159" y="170" width="28" height="32" rx="3" class="un"/><rect x="189" y="170" width="28" height="32" rx="3" class="un"/><rect x="219" y="170" width="28" height="32" rx="3" class="on"/><text x="233.0" y="190.0" class="cl ont" text-anchor="middle">A</text><rect x="249" y="170" width="28" height="32" rx="3" class="on"/><text x="263.0" y="190.0" class="cl ont" text-anchor="middle">K</text><rect x="279" y="170" width="28" height="32" rx="3" class="off"/><rect x="309" y="170" width="28" height="32" rx="3" class="off"/><rect x="339" y="170" width="28" height="32" rx="3" class="on"/><text x="353.0" y="190.0" class="cl ont" text-anchor="middle">T</text><rect x="369" y="170" width="28" height="32" rx="3" class="on"/><text x="383.0" y="190.0" class="cl ont" text-anchor="middle">9</text><rect x="399" y="170" width="28" height="32" rx="3" class="off"/><rect x="429" y="170" width="28" height="32" rx="3" class="off"/><rect x="459" y="170" width="28" height="32" rx="3" class="off"/><rect x="489" y="170" width="28" height="32" rx="3" class="on"/><text x="503.0" y="190.0" class="cl ont" text-anchor="middle">5</text><rect x="519" y="170" width="28" height="32" rx="3" class="off"/><rect x="549" y="170" width="28" height="32" rx="3" class="off"/><rect x="579" y="170" width="28" height="32" rx="3" class="off"/><text x="620" y="191" class="mono" text-anchor="start">0x1988</text></svg></div>
+<figcaption>North's hand at no trumps is the word <code>0x1014082006021988</code>. Each row is one 16-bit lane. Green cells are cards held. The dashed cells (bits 13 and 14) are unused, and the outlined cell on the left of each lane is the guard bit.</figcaption>
+</figure>
+
+<pre><code>constexpr u64 LANE0 = 0x1FFF;
+constexpr u64 GUARD = 0x8000800080008000ull;
+constexpr u64 ONES = 0x0001000100010001ull;
+constexpr u64 ALL_LANES = 0x1FFF1FFF1FFF1FFFull;
+
+constexpr u64 LANE(int s) { return LANE0 << (16 * s); }
+inline u64 lane_of(u64 c) { return LANE0 << (__builtin_ctzll(c) & 48); }
+inline int suit_of(u64 c) { return __builtin_ctzll(c) >> 4; }</code></pre>
+<p class="src">ddclaim/include/ddclaim/tables.hpp, namespace ddclaim::bits</p>
+
+<p>A single card is a word with one bit set. Its suit is <code>ctz &gt;&gt; 4</code>, and its lane mask is <code>LANE0</code> shifted by <code>ctz &amp; 48</code>. Within one suit, comparing two cards is ordinary integer comparison because a higher rank is a higher bit. The search compares only cards it already knows are in the same lane.</p>
+
+<h3>Trumps always live in lane 3</h3>
+<p>When the position is loaded, the trump suit swaps lanes with suit 3. After that, "is this card a trump?" is <code>c &amp; LANE(3)</code> with a constant mask, and the trump test is fixed at compile time:</p>
+<pre><code>for (int s = 0; s &lt; 4; s++) {
+  int lane = s;
+  if (tr &lt; 4) lane = s == tr ? 3 : (s == 3 ? tr : s);
+  hq |= u64(p.hand[q][s]) &lt;&lt; (16 * lane);
+  lens |= u64(__builtin_popcount(p.hand[q][s])) &lt;&lt; (16 * q + 4 * lane);
+}</code></pre>
+<p class="src">ddfast/src/solver.cpp, solve_position</p>
+<pre><code>template &lt;bool NT&gt;
+struct Cfg {
+  static constexpr u64 TR = NT ? 0 : LANE(3);
+};</code></pre>
+<p class="src">ddfast/src/solver.cpp</p>
+<p>Because the search is a template on <code>NT</code>, the no-trump build has <code>TR = 0</code> and the ruff tests compile away. The fixed trump lane also helps ddclaim's tables: they sort lanes 0 to 2 (the side suits) by length with a byte shuffle (<code>shuffle_lanes</code> / <code>ddport::shuf8</code>) and leave lane 3 alone, so equivalent endings share one table entry.</p>
+
+<h3>Suit lengths in a second word</h3>
+<p><code>LENS</code> is laid out differently from the hands: one 16-bit lane per <em>seat</em>, and inside it one 4-bit nibble per suit. Nibble <code>4*seat + suit</code>, at bit <code>16*seat + 4*suit</code>, holds the length of that holding.</p>
+<figure>
+<div class="figscroll"><svg viewBox="0 0 624 74" role="img" aria-label="LENS: one 16-bit lane per seat, a 4-bit length per suit" class="diag"><text x="84" y="14" class="lblb" text-anchor="middle">W &#183; bits 48&#8211;63</text><rect x="9" y="22" width="36" height="30" rx="3" class="nib"/><text x="27.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="27.0" y="67" class="lbl " text-anchor="middle">&#9827;</text><rect x="47" y="22" width="36" height="30" rx="3" class="nib"/><text x="65.0" y="41.0" class="cl nibt" text-anchor="middle">4</text><text x="65.0" y="67" class="lbl red" text-anchor="middle">&#9830;</text><rect x="85" y="22" width="36" height="30" rx="3" class="nib"/><text x="103.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="103.0" y="67" class="lbl red" text-anchor="middle">&#9829;</text><rect x="123" y="22" width="36" height="30" rx="3" class="nib dim"/><text x="141.0" y="41.0" class="cl nib dimt" text-anchor="middle">3</text><text x="141.0" y="67" class="lbl " text-anchor="middle">&#9824;</text><text x="236" y="14" class="lblb" text-anchor="middle">S &#183; bits 32&#8211;47</text><rect x="161" y="22" width="36" height="30" rx="3" class="nib"/><text x="179.0" y="41.0" class="cl nibt" text-anchor="middle">4</text><text x="179.0" y="67" class="lbl " text-anchor="middle">&#9827;</text><rect x="199" y="22" width="36" height="30" rx="3" class="nib"/><text x="217.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="217.0" y="67" class="lbl red" text-anchor="middle">&#9830;</text><rect x="237" y="22" width="36" height="30" rx="3" class="nib"/><text x="255.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="255.0" y="67" class="lbl red" text-anchor="middle">&#9829;</text><rect x="275" y="22" width="36" height="30" rx="3" class="nib dim"/><text x="293.0" y="41.0" class="cl nib dimt" text-anchor="middle">3</text><text x="293.0" y="67" class="lbl " text-anchor="middle">&#9824;</text><text x="388" y="14" class="lblb" text-anchor="middle">E &#183; bits 16&#8211;31</text><rect x="313" y="22" width="36" height="30" rx="3" class="nib"/><text x="331.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="331.0" y="67" class="lbl " text-anchor="middle">&#9827;</text><rect x="351" y="22" width="36" height="30" rx="3" class="nib"/><text x="369.0" y="41.0" class="cl nibt" text-anchor="middle">4</text><text x="369.0" y="67" class="lbl red" text-anchor="middle">&#9830;</text><rect x="389" y="22" width="36" height="30" rx="3" class="nib"/><text x="407.0" y="41.0" class="cl nibt" text-anchor="middle">4</text><text x="407.0" y="67" class="lbl red" text-anchor="middle">&#9829;</text><rect x="427" y="22" width="36" height="30" rx="3" class="nib dim"/><text x="445.0" y="41.0" class="cl nib dimt" text-anchor="middle">2</text><text x="445.0" y="67" class="lbl " text-anchor="middle">&#9824;</text><text x="540" y="14" class="lblb" text-anchor="middle">N &#183; bits 0&#8211;15</text><rect x="465" y="22" width="36" height="30" rx="3" class="nib"/><text x="483.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="483.0" y="67" class="lbl " text-anchor="middle">&#9827;</text><rect x="503" y="22" width="36" height="30" rx="3" class="nib"/><text x="521.0" y="41.0" class="cl nibt" text-anchor="middle">2</text><text x="521.0" y="67" class="lbl red" text-anchor="middle">&#9830;</text><rect x="541" y="22" width="36" height="30" rx="3" class="nib"/><text x="559.0" y="41.0" class="cl nibt" text-anchor="middle">3</text><text x="559.0" y="67" class="lbl red" text-anchor="middle">&#9829;</text><rect x="579" y="22" width="36" height="30" rx="3" class="nib dim"/><text x="597.0" y="41.0" class="cl nib dimt" text-anchor="middle">5</text><text x="597.0" y="67" class="lbl " text-anchor="middle">&#9824;</text></svg></div>
+<figcaption>LENS for a deal where North is 5-3-2-3 (the other seats' lengths are example values). North's lane is <code>0x3235</code>. The dashed spade nibbles are dropped from table keys (<code>lens48</code>), because each hand's spade length follows from its card count and its other three lengths.</figcaption>
+</figure>
+<pre><code>inline int len_of(int seat, int suit) { return int(LENS &gt;&gt; (16 * seat + 4 * suit)) &amp; 15; }</code></pre>
+<p class="src">ddfast/src/solver.cpp</p>
+
+<h2>Core operations, worked on the example</h2>
+<p>In the examples below, &#9824;8, &#9824;7 and &#9824;6 have already been played. The other spades still out are &#9824;Q4 (East), &#9824;J3 (South) and &#9824;2 (West). The cards in play (<code>all</code> or <code>present</code> in the code) are <code>H[0] | H[1] | H[2] | H[3]</code>. In the spade lane that is A K Q J T 9 5 4 3 2, or <code>0x1f8f</code>.</p>
+
+<h3>A card and everything above it</h3>
+<pre><code>inline u64 ge(u64 c) { return lane_of(c) &amp; (0 - c); }       // c and everything above it in its suit
+inline u64 above(u64 c) { return ~((c &lt;&lt; 1) - 1); }        // all bits above c (any lane)
+inline u64 lowest(u64 x) { return x &amp; (0 - x); }
+inline u64 highest(u64 x) { return 1ull &lt;&lt; (63 - __builtin_clzll(x)); }</code></pre>
+<p class="src">tables.hpp</p>
+<p><code>0 - c</code> sets c and every bit above it, and the lane mask trims the result to c's suit. <code>ge(&#9824;T)</code> = <code>0x1f00</code> = &#9824;A K Q J T. The top card of a suit is <code>highest(x &amp; LANE(s))</code>. The vector code below gets the top card of all four suits at once with a per-lane <code>lzcnt</code>.</p>
+
+<h3>fill_up: every card at and above the lowest one, in each suit</h3>
+<pre><code>inline u64 fill_up(u64 x) {
+  u64 y = x | GUARD;
+  u64 low = y &amp; ~(y - ONES);
+  return (GUARD - low) &amp; ALL_LANES;
+}</code></pre>
+<p class="src">tables.hpp</p>
+<p>The guard bit makes every lane nonzero, so <code>y - ONES</code> subtracts 1 in each lane with no borrow crossing a lane boundary. <code>y &amp; ~(y - ONES)</code> keeps the lowest set bit of each lane, which is the guard for an empty lane. <code>GUARD - low</code> then sets, in each lane, every bit from that lowest bit up to bit 14, and is zero in a lane where low was the guard. <code>ALL_LANES</code> trims the result to bits 0 to 12.</p>
+<p>Worked: x = {&#9824;J, <span class="red">&#9830;K</span>}. Then y = <code>0x8000880080008200</code>, low = <code>0x8000080080000200</code>, and the result is <code>0x0000180000001e00</code> = &#9824;AKQJ and <span class="red">&#9830;AK</span>. Hearts and clubs are empty.</p>
+<p>The search uses this for <b>relevant cards</b>, the cards whose ranks a result depends on. If the &#9824;J mattered, then who holds the A, K and Q matters too. After fill_up, the relevant set in each suit is "the top k cards of the suit", which makes a compact table pattern (see below).</p>
+
+<h3>One card per run of touching cards, with pext and pdep</h3>
+<p>Cards that touch in play are equivalent: once &#9824;8, 7 and 6 are gone, North's &#9824;T, 9 and 5 behave the same. The search tries only one card from each such run. ddclaim and ddfast find the top of every run in one step. <code>pext</code> packs the cards in play together so that cards which touch become adjacent bits. A shift and a mask then find the tops, and <code>pdep</code> puts the result back in place:</p>
+<pre><code>inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
+  const u64 p = present | GUARD_BITS;
+  const u64 pm = _pext_u64(mine, p), hc = pm &amp; ~(pm &gt;&gt; 1);
+  if (seq) *seq = _pdep_u64(hc &amp; (pm &lt;&lt; 1), p);
+  return _pdep_u64(hc, p);
+}</code></pre>
+<p class="src">ddclaim/include/ddclaim/port.hpp (x86 version); tables.hpp calls it as bits::heads</p>
+
+<figure>
+<div class="figscroll"><svg viewBox="0 0 608 322" role="img" aria-label="pext packs the spade cards in play into 11 bits, a shift and mask finds the top of each run of North's cards, pdep puts them back: the ace and the ten" class="diag"><text x="164.0" y="14" class="lblb" text-anchor="middle">G</text><text x="192.0" y="14" class="lblb" text-anchor="middle"></text><text x="220.0" y="14" class="lblb" text-anchor="middle"></text><text x="248.0" y="14" class="lblb" text-anchor="middle">A</text><text x="276.0" y="14" class="lblb" text-anchor="middle">K</text><text x="304.0" y="14" class="lblb" text-anchor="middle">Q</text><text x="332.0" y="14" class="lblb" text-anchor="middle">J</text><text x="360.0" y="14" class="lblb" text-anchor="middle">T</text><text x="388.0" y="14" class="lblb" text-anchor="middle">9</text><text x="416.0" y="14" class="lblb" text-anchor="middle">8</text><text x="444.0" y="14" class="lblb" text-anchor="middle">7</text><text x="472.0" y="14" class="lblb" text-anchor="middle">6</text><text x="500.0" y="14" class="lblb" text-anchor="middle">5</text><text x="528.0" y="14" class="lblb" text-anchor="middle">4</text><text x="556.0" y="14" class="lblb" text-anchor="middle">3</text><text x="584.0" y="14" class="lblb" text-anchor="middle">2</text><text x="8" y="35" class="lblb" text-anchor="start">p = present | GUARD</text><text x="8" y="49" class="tiny" text-anchor="start">spade lane, bits 15..0</text><rect x="151" y="22" width="26" height="28" rx="3" class="gd"/><text x="164.0" y="40.0" class="cl gdt" text-anchor="middle">1</text><rect x="179" y="22" width="26" height="28" rx="3" class="off"/><rect x="207" y="22" width="26" height="28" rx="3" class="off"/><rect x="235" y="22" width="26" height="28" rx="3" class="pr"/><text x="248.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="263" y="22" width="26" height="28" rx="3" class="pr"/><text x="276.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="291" y="22" width="26" height="28" rx="3" class="pr"/><text x="304.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="319" y="22" width="26" height="28" rx="3" class="pr"/><text x="332.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="347" y="22" width="26" height="28" rx="3" class="pr"/><text x="360.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="375" y="22" width="26" height="28" rx="3" class="pr"/><text x="388.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="403" y="22" width="26" height="28" rx="3" class="off"/><rect x="431" y="22" width="26" height="28" rx="3" class="off"/><rect x="459" y="22" width="26" height="28" rx="3" class="off"/><rect x="487" y="22" width="26" height="28" rx="3" class="pr"/><text x="500.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="515" y="22" width="26" height="28" rx="3" class="pr"/><text x="528.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="543" y="22" width="26" height="28" rx="3" class="pr"/><text x="556.0" y="40.0" class="cl prt" text-anchor="middle">1</text><rect x="571" y="22" width="26" height="28" rx="3" class="pr"/><text x="584.0" y="40.0" class="cl prt" text-anchor="middle">1</text><text x="8" y="71" class="lblb" text-anchor="start">mine (North)</text><text x="8" y="85" class="tiny" text-anchor="start">A K T 9 5</text><rect x="151" y="58" width="26" height="28" rx="3" class="off"/><rect x="179" y="58" width="26" height="28" rx="3" class="off"/><rect x="207" y="58" width="26" height="28" rx="3" class="off"/><rect x="235" y="58" width="26" height="28" rx="3" class="on"/><text x="248.0" y="76.0" class="cl ont" text-anchor="middle">A</text><rect x="263" y="58" width="26" height="28" rx="3" class="on"/><text x="276.0" y="76.0" class="cl ont" text-anchor="middle">K</text><rect x="291" y="58" width="26" height="28" rx="3" class="off"/><rect x="319" y="58" width="26" height="28" rx="3" class="off"/><rect x="347" y="58" width="26" height="28" rx="3" class="on"/><text x="360.0" y="76.0" class="cl ont" text-anchor="middle">T</text><rect x="375" y="58" width="26" height="28" rx="3" class="on"/><text x="388.0" y="76.0" class="cl ont" text-anchor="middle">9</text><rect x="403" y="58" width="26" height="28" rx="3" class="off"/><rect x="431" y="58" width="26" height="28" rx="3" class="off"/><rect x="459" y="58" width="26" height="28" rx="3" class="off"/><rect x="487" y="58" width="26" height="28" rx="3" class="on"/><text x="500.0" y="76.0" class="cl ont" text-anchor="middle">5</text><rect x="515" y="58" width="26" height="28" rx="3" class="off"/><rect x="543" y="58" width="26" height="28" rx="3" class="off"/><rect x="571" y="58" width="26" height="28" rx="3" class="off"/><path d="M164.0 88 C 164.0 116, 234.0 116, 234.0 145" class="wire"/><path d="M248.0 88 C 248.0 116, 262.0 116, 262.0 145" class="wire hot"/><path d="M276.0 88 C 276.0 116, 290.0 116, 290.0 145" class="wire hot"/><path d="M304.0 88 C 304.0 116, 318.0 116, 318.0 145" class="wire"/><path d="M332.0 88 C 332.0 116, 346.0 116, 346.0 145" class="wire"/><path d="M360.0 88 C 360.0 116, 374.0 116, 374.0 145" class="wire hot"/><path d="M388.0 88 C 388.0 116, 402.0 116, 402.0 145" class="wire hot"/><path d="M500.0 88 C 500.0 116, 430.0 116, 430.0 145" class="wire hot"/><path d="M528.0 88 C 528.0 116, 458.0 116, 458.0 145" class="wire"/><path d="M556.0 88 C 556.0 116, 486.0 116, 486.0 145" class="wire"/><path d="M584.0 88 C 584.0 116, 514.0 116, 514.0 145" class="wire"/><text x="594" y="120" class="op" text-anchor="end">pext(mine, p)</text><text x="8" y="161" class="lblb" text-anchor="start">pm</text><text x="8" y="175" class="tiny" text-anchor="start">11 cards in play + guard</text><rect x="221.0" y="148" width="26" height="28" rx="3" class="off"/><text x="234.0" y="166.0" class="cl offt" text-anchor="middle">0</text><rect x="249.0" y="148" width="26" height="28" rx="3" class="on"/><text x="262.0" y="166.0" class="cl ont" text-anchor="middle">1</text><rect x="277.0" y="148" width="26" height="28" rx="3" class="on"/><text x="290.0" y="166.0" class="cl ont" text-anchor="middle">1</text><rect x="305.0" y="148" width="26" height="28" rx="3" class="off"/><text x="318.0" y="166.0" class="cl offt" text-anchor="middle">0</text><rect x="333.0" y="148" width="26" height="28" rx="3" class="off"/><text x="346.0" y="166.0" class="cl offt" text-anchor="middle">0</text><rect x="361.0" y="148" width="26" height="28" rx="3" class="on"/><text x="374.0" y="166.0" class="cl ont" text-anchor="middle">1</text><rect x="389.0" y="148" width="26" height="28" rx="3" class="on"/><text x="402.0" y="166.0" class="cl ont" text-anchor="middle">1</text><rect x="417.0" y="148" width="26" height="28" rx="3" class="on"/><text x="430.0" y="166.0" class="cl ont" text-anchor="middle">1</text><rect x="445.0" y="148" width="26" height="28" rx="3" class="off"/><text x="458.0" y="166.0" class="cl offt" text-anchor="middle">0</text><rect x="473.0" y="148" width="26" height="28" rx="3" class="off"/><text x="486.0" y="166.0" class="cl offt" text-anchor="middle">0</text><rect x="501.0" y="148" width="26" height="28" rx="3" class="off"/><text x="514.0" y="166.0" class="cl offt" text-anchor="middle">0</text><text x="234.0" y="188" class="tiny" text-anchor="middle">G</text><text x="262.0" y="188" class="tiny" text-anchor="middle">A</text><text x="290.0" y="188" class="tiny" text-anchor="middle">K</text><text x="318.0" y="188" class="tiny" text-anchor="middle">Q</text><text x="346.0" y="188" class="tiny" text-anchor="middle">J</text><text x="374.0" y="188" class="tiny" text-anchor="middle">T</text><text x="402.0" y="188" class="tiny" text-anchor="middle">9</text><text x="430.0" y="188" class="tiny" text-anchor="middle">5</text><text x="458.0" y="188" class="tiny" text-anchor="middle">4</text><text x="486.0" y="188" class="tiny" text-anchor="middle">3</text><text x="514.0" y="188" class="tiny" text-anchor="middle">2</text><text x="8" y="211" class="lblb" text-anchor="start">pm &amp; ~(pm &gt;&gt; 1)</text><text x="8" y="225" class="tiny" text-anchor="start">top of each run</text><rect x="221.0" y="198" width="26" height="28" rx="3" class="off"/><text x="234.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="249.0" y="198" width="26" height="28" rx="3" class="on"/><text x="262.0" y="216.0" class="cl ont" text-anchor="middle">1</text><rect x="277.0" y="198" width="26" height="28" rx="3" class="off"/><text x="290.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="305.0" y="198" width="26" height="28" rx="3" class="off"/><text x="318.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="333.0" y="198" width="26" height="28" rx="3" class="off"/><text x="346.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="361.0" y="198" width="26" height="28" rx="3" class="on"/><text x="374.0" y="216.0" class="cl ont" text-anchor="middle">1</text><rect x="389.0" y="198" width="26" height="28" rx="3" class="off"/><text x="402.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="417.0" y="198" width="26" height="28" rx="3" class="off"/><text x="430.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="445.0" y="198" width="26" height="28" rx="3" class="off"/><text x="458.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="473.0" y="198" width="26" height="28" rx="3" class="off"/><text x="486.0" y="216.0" class="cl offt" text-anchor="middle">0</text><rect x="501.0" y="198" width="26" height="28" rx="3" class="off"/><text x="514.0" y="216.0" class="cl offt" text-anchor="middle">0</text><path d="M234.0 228 C 234.0 256, 164.0 256, 164.0 285" class="wire"/><path d="M262.0 228 C 262.0 256, 248.0 256, 248.0 285" class="wire hot"/><path d="M290.0 228 C 290.0 256, 276.0 256, 276.0 285" class="wire"/><path d="M318.0 228 C 318.0 256, 304.0 256, 304.0 285" class="wire"/><path d="M346.0 228 C 346.0 256, 332.0 256, 332.0 285" class="wire"/><path d="M374.0 228 C 374.0 256, 360.0 256, 360.0 285" class="wire hot"/><path d="M402.0 228 C 402.0 256, 388.0 256, 388.0 285" class="wire"/><path d="M430.0 228 C 430.0 256, 500.0 256, 500.0 285" class="wire"/><path d="M458.0 228 C 458.0 256, 528.0 256, 528.0 285" class="wire"/><path d="M486.0 228 C 486.0 256, 556.0 256, 556.0 285" class="wire"/><path d="M514.0 228 C 514.0 256, 584.0 256, 584.0 285" class="wire"/><text x="594" y="260" class="op" text-anchor="end">pdep(hc, p)</text><text x="8" y="301" class="lblb" text-anchor="start">heads(mine, present)</text><text x="8" y="315" class="tiny" text-anchor="start">one card per run</text><rect x="151" y="288" width="26" height="28" rx="3" class="off"/><rect x="179" y="288" width="26" height="28" rx="3" class="off"/><rect x="207" y="288" width="26" height="28" rx="3" class="off"/><rect x="235" y="288" width="26" height="28" rx="3" class="on"/><text x="248.0" y="306.0" class="cl ont" text-anchor="middle">A</text><rect x="263" y="288" width="26" height="28" rx="3" class="off"/><rect x="291" y="288" width="26" height="28" rx="3" class="off"/><rect x="319" y="288" width="26" height="28" rx="3" class="off"/><rect x="347" y="288" width="26" height="28" rx="3" class="on"/><text x="360.0" y="306.0" class="cl ont" text-anchor="middle">T</text><rect x="375" y="288" width="26" height="28" rx="3" class="off"/><rect x="403" y="288" width="26" height="28" rx="3" class="off"/><rect x="431" y="288" width="26" height="28" rx="3" class="off"/><rect x="459" y="288" width="26" height="28" rx="3" class="off"/><rect x="487" y="288" width="26" height="28" rx="3" class="off"/><rect x="515" y="288" width="26" height="28" rx="3" class="off"/><rect x="543" y="288" width="26" height="28" rx="3" class="off"/><rect x="571" y="288" width="26" height="28" rx="3" class="off"/></svg></div>
+<figcaption>The spade lane of <code>heads(North, all)</code>. pext keeps the 11 positions in play (10 spades plus the guard), packed low. In the packed form a card heads a run when the next card up is not North's. The guard bit is in <code>p</code> but never in a hand, so it stops runs at the suit boundary. <code>pm = 0x338</code>, <code>hc = 0x220</code>, and pdep gives back &#9824;A and &#9824;T. The optional <code>seq</code> output marks heads that have another card of the run below them.</figcaption>
+</figure>
+<p>Over the whole hand, <code>heads(North, all)</code> returns 9 candidates out of 13 cards: &#9824;A T, <span class="red">&#9829;Q 3, &#9830;K 7</span>, &#9827;A 6 4. (The &#9827;6 and &#9827;4 are separate runs because the &#9827;5 is still in play.)</p>
+<p>The search also needs the bottom of a run. When a run wins a trick, the relevant card is the lowest card of the winning run, so <code>run_bottom</code> uses the same packing:</p>
+<pre><code>inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
+  const u64 p = present | GUARD_BITS;
+  const u64 pm = _pext_u64(rest, p), bc = _pext_u64(c, p);
+  const u64 t = ~pm &amp; (bc - 1);
+  const u64 bb = 1ull &lt;&lt; (64 - _lzcnt_u64(t));  // just above the highest gap below c, or bit 0
+  return _pdep_u64(bb, p);
+}</code></pre>
+<p class="src">port.hpp (x86)</p>
+<p>Worked: <code>run_bottom(&#9824;T, North without &#9824;T, all)</code> = &#9824;5.</p>
+
+<h3>Following suit</h3>
+<p>The candidate cards at a follow node take two lines. With <code>lane</code> the mask of the suit led, the player follows suit if possible and otherwise may play anything:</p>
+<pre><code>const u64 mine = H[s];
+const u64 in_suit = mine &amp; lane;
+u64 cand = heads(in_suit ? in_suit : mine, all);</code></pre>
+<p class="src">ddfast/src/solver.cpp, follow()</p>
+<p>At a lead node it is just <code>heads(H[L], all)</code>.</p>
+
+<h3>Who wins the trick</h3>
+<p>The state of a trick is the best card so far (<code>best</code>, one bit), its seat (<code>bw</code>), and a flag <code>ranked</code>. The flag says whether the current winner beat a card of its own suit, meaning its rank decided the trick:</p>
+<pre><code>template &lt;bool NT&gt;
+inline void trick_step(u64 x, int s, u64&amp; best, int&amp; bw, bool&amp; ranked) {
+  constexpr u64 TR = Cfg&lt;NT&gt;::TR;
+  const bool same = (x &amp; lane_of(best)) != 0, ruff = (x &amp; TR) != 0;
+  const bool beats = same ? x &gt; best : ruff;
+  if (beats) best = x, bw = s;
+  ranked = same | (ranked &amp; !ruff);
+}</code></pre>
+<p class="src">ddfast/src/solver.cpp (follow() inlines the same three lines)</p>
+<p>Worked, with hearts as trumps (so hearts are lane 3): North leads &#9824;T, East plays &#9824;Q, South (void) ruffs with <span class="red">&#9829;5</span>, West overruffs with <span class="red">&#9829;9</span>.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>card</th><th>same</th><th>ruff</th><th>beats</th><th>best after</th><th>ranked</th></tr></thead>
+<tbody>
+<tr><td>N &#9824;T (lead)</td><td></td><td></td><td></td><td class="num">&#9824;T, N</td><td>0</td></tr>
+<tr><td>E &#9824;Q</td><td>1</td><td>0</td><td>Q &gt; T</td><td class="num">&#9824;Q, E</td><td>1</td></tr>
+<tr><td>S <span class="red">&#9829;5</span></td><td>0</td><td>1</td><td>ruff</td><td class="num"><span class="red">&#9829;5</span>, S</td><td>0</td></tr>
+<tr><td>W <span class="red">&#9829;9</span></td><td>1</td><td>1</td><td>9 &gt; 5</td><td class="num"><span class="red">&#9829;9</span>, W</td><td>1</td></tr>
+</tbody></table></div>
+<p>West wins. The relevant cards for the trick are then <code>ge(best) &amp; (0 - u64(ranked))</code> = <code>0x1f80000000000000</code> (<span class="red">&#9829;9</span> and every trump above it). If South's ruff had stood, <code>ranked</code> would be 0 and no ranks would matter. At the end of a trick ddfast uses the bottom of the winner's run:</p>
+<pre><code>const u64 Rt = (RUNOPT ? ge(nb) : ge(run_bottom(nb, H[nbw], all))) &amp; (0 - u64(nr));</code></pre>
+<p class="src">ddfast/src/solver.cpp, follow(), K == 3</p>
+
+<h2>Make and unmake: one XOR and one nibble</h2>
+<p>Playing a card clears its bit in the hand and decrements one length nibble. Taking it back reverses both:</p>
+<pre><code>inline void play(int s, u64 c) { H[s] ^= c; LENS -= 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }
+inline void unplay(int s, u64 c) { H[s] ^= c; LENS += 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }</code></pre>
+<p class="src">ddfast/src/solver.cpp (lead() and follow() write the same two lines inline)</p>
+<p>Nothing else needs updating. The cards in play, the top cards of each suit, the runs and the winners are all recomputed from the four words when they are needed. Compare the position that DDS maintains per node. ddfast's line-by-line port of DDS (<code>src/dds_port.hpp</code>) mirrors it as:</p>
+<pre><code>struct Pos {
+  unsigned short rank_in_suit[4][4];  // holdings now
+  unsigned short aggr[4];             // all hands' cards of each suit now
+  unsigned char length[4][4];
+  HighCardType winner[4], second_best[4];  // top two cards of each suit at the start of the trick
+  HighCardType third[4];                   // the third-best card of each suit now
+  ...</code></pre>
+<p class="src">ddfast/src/dds_port.hpp</p>
+<p>Early ddfast still filled this struct to call the ported DDS bounds and move ordering. The notes record the gain from rewriting those on the hand words:</p>
+<ul>
+<li>Round 4: follow-node moves generated with pext/pdep instead of the port's ordering, 25.9M &#8594; 25.5M cycles per deal.</li>
+<li>Round 6: DDS's lead weights (<code>native_order</code>) and second-hand quick tricks rewritten on the 64-bit words, 25.1-25.6M &#8594; 22.7-23.0M cycles per deal (&#8722;9%). These are checked against the port on every call under <code>-DVERIFY_ORDER</code>.</li>
+<li>Round 7: lead-node QuickTricks and LaterTricks rewritten on the words, with "top/second/third cards found with lzcnt per lane, owners from three bit tests, lengths from LENS". After this no port position is built at lead nodes.</li>
+</ul>
+<p class="src">ddfast/docs/NOTES.md, Rounds 4, 6 and 7</p>
+
+<h2>Table keys from the same words</h2>
+<p>A transposition-table entry records which cards mattered and who held them, not the cards themselves. ddfast builds the key from <code>LENS</code> and builds the pattern by compressing the hands with <code>pext</code> over the cards in play:</p>
+<pre><code>const u64 all = H[0] | H[1] | H[2] | H[3];
+const ddport::BitMask bm_(all);
+const u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);
+const u64 key54 = lens48(LENS) | u64(L) &lt;&lt; 48 | u64(n) &lt;&lt; 50;</code></pre>
+<p class="src">ddfast/src/solver.cpp, lead()</p>
+<ul>
+<li><b>key54</b>: the 48 bits of suit lengths (<code>lens48</code> keeps suits 1 to 3 of each seat), the leader and the number of cards per hand. Entries under one key share every hand's suit lengths, so a given position in the packed order is the same <em>relative</em> rank in every position under that key.</li>
+<li><b>ewq, swq</b>: two bits per card in play, in packed order. The ewq bit means East or West holds it, and the swq bit means South or West holds it. So North = 00, East = 10, South = 01, West = 11.</li>
+</ul>
+<p>Worked, spade lane only (packed low to high: 2 3 4 5 9 T J Q K A): ewq = <code>0x85</code> (bits for &#9824;2 W, &#9824;4 E, &#9824;Q E), swq = <code>0x43</code> (&#9824;2 W, &#9824;3 S, &#9824;J S).</p>
+<p>To store an entry, the relevant cards <code>Racc</code> are packed the same way. Because of fill_up they are the top block of each suit:</p>
+<pre><code>const u64 m = ddport::pext64(Racc, all);
+...
+const u64 mm = m | m &lt;&lt; 28;
+e[cnt] = (ewq | swq &lt;&lt; 28) &amp; mm;
+// Bit 55 + t: the entry decides target t (1..7); bit 63: the answer.
+const u64 dec = res ? (1ull &lt;&lt; target) - 1 : 0x7Full &amp; ~((1ull &lt;&lt; (target - 1)) - 1);
+e[8 + cnt] = mm | dec &lt;&lt; 56 | u64(res) &lt;&lt; 63;</code></pre>
+<p class="src">ddfast/src/solver.cpp, tt_store (narrow entries, up to 7 cards a hand; wide entries for 8+ use three 52-bit words)</p>
+<p>For example, if the top three spades mattered, <code>m = pext(fill_up(&#9824;Q), all)</code> is <code>0x380</code> in the spade part, and <code>pdep(0x380, all)</code> gives back &#9824;AKQ. On a hit the stored mask is expanded onto the <em>current</em> position's cards, so a pattern learnt in one position names the corresponding cards in another:</p>
+<pre><code>R = fill_up(ddport::pdep64(bb &amp; 0xFFFFFFF, all));</code></pre>
+<p class="src">ddfast/src/solver.cpp, tt_lookup</p>
+
+<h3>AVX-512: eight entries per compare</h3>
+<p>Entries sit in blocks of eight: eight owner patterns in one 64-byte line and their masks in the next. A lookup compares all eight with one masked compare and tests the "decides this target" bit:</p>
+<pre><code>inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
+  const __m512i vb = _mm512_load_si512(e + 8);
+  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
+  return k &amp; _mm512_test_epi64_mask(vb, _mm512_set1_epi64((long long)dec));
+}</code></pre>
+<p class="src">ddfast/src/solver.cpp</p>
+<p>ddclaim's pattern tables use the same idea (<code>ddport::pmatch8</code>), and its two- and three-card table probes rank the owner strings with <code>pext</code> and look up a precomputed answer.</p>
+
+<h3>The per-suit vector lanes in native_order</h3>
+<p>DDS's lead-ordering weights depend on per-suit facts: lengths, the top three cards and who holds them. ddfast widens each 16-bit suit lane of a hand word to a 32-bit vector lane and computes all four suits at once:</p>
+<pre><code>auto ld = [](u64 h) { return _mm_cvtepu16_epi32(_mm_cvtsi64_si128((long long)h)); };
+auto hib = [](V v) { return _mm_srlv_epi32(_mm_set1_epi32(int(0x80000000u)), _mm_lzcnt_epi32(v)); };
+...
+const V X = ld(all), VL = ld(hl), VP = ld(hp), VA = ld(ha), VB = ld(hb);
+const V lenA = _mm_popcnt_epi32(VA), lenB = _mm_popcnt_epi32(VB), lenP = _mm_popcnt_epi32(VP);
+const V top1 = hib(X), X2 = _mm_xor_si128(X, top1), top2 = hib(X2), top3 = hib(_mm_xor_si128(X2, top2));
+const M w1L = tst(top1, VL), w1P = tst(top1, VP), w1A = tst(top1, VA), w1B = tst(top1, VB);</code></pre>
+<p class="src">ddfast/src/solver.cpp, native_order (AVX-512VL)</p>
+<p>The per-card part then gets the candidate cards (the run heads) into one zmm register, one card per 32-bit lane. It bit-reverses each suit (<code>gf2p8affine</code> + <code>pshufb</code>) and compresses the bit positions (<code>vpcompressb</code>). NOTES.md (Round 9) gives the gains: the per-suit vector part &#8722;5.3% cycles and the per-card zmm part &#8722;3.2%.</p>
+
+<h2>Costs and limits</h2>
+<ul>
+<li><b>Instruction set.</b> The x86 build needs BMI2 (pext, pdep) and AVX-512. The README lists Zen 4/5 and Intel Ice Lake and later. <code>tables.hpp</code>: "Requires an x86-64 CPU with AVX-512 and BMI2 ... or AArch64 (Apple silicon; see port.hpp)."</li>
+<li><b>pext speed varies by CPU.</b> On Zen 1 and Zen 2, pext and pdep are microcoded and much slower than on Intel or Zen 3 and later. <span class="note">This is general hardware knowledge, not something stated in either repository. Those CPUs also lack AVX-512, so the x86 build does not run on them.</span></li>
+<li><b>Arm has no pext or pdep.</b> <code>port.hpp</code> emulates them a byte at a time through two 256&#215;256 tables (64 KB each, so both fit in a performance core's 128 KB L1). Each byte's output offset is a prefix sum of the mask's byte popcounts, from one NEON <code>cnt</code> and a multiply. The README puts this at "about 50 instructions for what is one instruction on x86". The run finder avoids pext entirely on Arm and uses an add-and-carry trick on bit-reversed words instead:</li>
+</ul>
+<pre><code>inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
+  const u64 gaps = __builtin_bitreverse64(~present &amp; ~GUARD_BITS);
+  const u64 seeds = __builtin_bitreverse64((present &amp; ~mine) | GUARD_BITS) &lt;&lt; 1;
+  const u64 stop = (((seeds &amp; gaps) + gaps) &amp; ~gaps) | (seeds &amp; ~gaps);
+  const u64 h = __builtin_bitreverse64(__builtin_bitreverse64(mine) &amp; stop);
+  if (seq) *seq = h &amp; next_up(mine, present);
+  return h;
+}</code></pre>
+<p class="src">port.hpp (AArch64 version)</p>
+<p>A carry started just below each card in play that is not mine (or the suit's guard) runs through the gaps left by played cards and stops at the next card in play. If that card is mine, it heads a run. The AVX-512 table matches become two-lane NEON compares.</p>
+
+<h2>Figures and where they come from</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>figure</th><th>value</th><th>source</th></tr></thead>
+<tbody>
+<tr><td>Single problems, 600 random deals, one Zen 5 core</td><td class="num">271 vs 63 deals/s (4.3x)</td><td>README, Speed</td></tr>
+<tr><td>Full tables, 200 deals, one thread</td><td class="num">33.9 vs 133.8 ms (3.9x)</td><td>README, Speed</td></tr>
+<tr><td>ddfast, public set</td><td class="num">16.1M cycles/deal</td><td>README, Speed</td></tr>
+<tr><td>DDS on Zen 5</td><td class="num">about 80M cycles/deal</td><td>README, macOS port</td></tr>
+<tr><td>Nodes searched, public set (final code)</td><td class="num">84.84M (141.4k/deal)</td><td>NOTES, Rounds 11-12</td></tr>
+<tr><td>Cycles and instructions at that node count</td><td class="num">17.40M cycles, 40.05M instr./deal</td><td>NOTES, Round 12</td></tr>
+<tr><td>Cycles per node (derived: 17.40M / 141.4k)</td><td class="num">about 123</td><td>computed from NOTES</td></tr>
+<tr><td>Earlier version: time per node</td><td class="num">about 37 ns at 207,000 nodes/deal</td><td>NOTES, Round 3</td></tr>
+<tr><td>DDS search calls per deal</td><td class="num">230,000</td><td>NOTES, Rounds 3 and 5</td></tr>
+<tr><td>Apple M5 port</td><td class="num">55M vs 40M instr.; 15.5M vs 16.1M cycles</td><td>README, macOS port</td></tr>
+<tr><td>Ratio to DDS on the Mac</td><td class="num">about 3x (3.1x single problems)</td><td>README</td></tr>
+</tbody></table></div>
+<p class="note">The cycles-per-node figure is a quotient of two numbers from the same NOTES round, not a measurement. The README's 16.1M cycles per deal is a later build than the Round 12 figures. The 37 ns per node comes from an earlier version that searched 207,000 nodes per deal.</p>
+</main>
+
+</html>
