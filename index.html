@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ddfast design</title>
+<style>
+:root { --bg: #fbfaf7; --fg: #1d1f21; --muted: #5c6166; --line: #dedad2; --link: #1f5fbf; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14161a; --fg: #e6e4df; --muted: #a2a6ab; --line: #2c3036; --link: #7fb0ff; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 system-ui, sans-serif; }
+main { max-width: 680px; margin: 0 auto; padding: 48px 16px; }
+h1 { font-size: 1.9rem; margin: 0 0 .3rem; }
+p.lede { color: var(--muted); margin: 0 0 2rem; }
+a { color: var(--link); }
+.card { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 0 0 14px; text-decoration: none; color: inherit; }
+.card:hover { border-color: var(--link); }
+.card h2 { font-size: 1.15rem; margin: 0 0 .3rem; color: var(--link); }
+.card p { margin: 0; color: var(--muted); }
+footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>ddfast design</h1>
+<p class="lede">Illustrated explainers of the techniques behind <a href="https://github.com/randalburns/ddfast">ddfast</a>, a performance optimization of the <a href="https://github.com/dds-bridge/dds">DDS</a> double-dummy search, for programmers who know C++ and bridge basics.</p>
+<a class="card" href="hand-words.html"><h2>One word per hand</h2><p>Each hand as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners, one card per run of touching cards, the cards that decided a result) as a few bit operations.</p></a>
+<a class="card" href="table-search.html"><h2>The pattern table search</h2><p>The per-deal transposition table of card patterns, its directory and blocks, and how AVX-512 matches a block of 8 stored patterns against a position in a few instructions.</p></a>
+<footer>Source and documentation: <a href="https://github.com/randalburns/ddfast">github.com/randalburns/ddfast</a></footer>
+</main>
+</body>
+</html>

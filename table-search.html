@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ddfast Pattern Table</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with wider figures; code and diagrams scroll inside their own boxes. */
+:root {
+  --bg: #f6f8f6;
+  --surface: #ffffff;
+  --fg: #18211d;
+  --muted: #56645c;
+  --rule: #d5ddd8;
+  --felt: #1d6b4c;       /* card-table green: the accent */
+  --felt-soft: #e2efe8;
+  --heart: #b3312f;      /* second hue, used for "decides" and the chosen lane */
+  --heart-soft: #f6e3e1;
+  --code-bg: #eef2ef;
+  --f-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111614; --surface: #171e1b; --fg: #e3ebe6; --muted: #9aaba1; --rule: #2d3833;
+    --felt: #5cc497; --felt-soft: #1b3329; --heart: #f08a80; --heart-soft: #3a2221; --code-bg: #1a221f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111614; --surface: #171e1b; --fg: #e3ebe6; --muted: #9aaba1; --rule: #2d3833;
+  --felt: #5cc497; --felt-soft: #1b3329; --heart: #f08a80; --heart-soft: #3a2221; --code-bg: #1a221f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.62 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 80px;
+}
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 0; }
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(2rem, 6vw, 2.9rem); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.55rem; font-weight: 600; margin-top: 3.2rem; margin-bottom: 0.8rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.12rem; font-weight: 600; margin-top: 1.8rem; margin-bottom: 0.4rem; }
+p { margin: 0.7rem 0; }
+.eyebrow { font: 600 0.75rem/1 var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--felt); margin-bottom: 0.9rem; }
+.lede { font-size: 1.15rem; color: var(--muted); margin-top: 1rem; }
+a { color: var(--felt); }
+code { font-family: var(--f-mono); font-size: 0.88em; background: var(--code-bg); padding: 0.08em 0.32em; border-radius: 3px; }
+pre {
+  font: 13px/1.55 var(--f-mono); background: var(--code-bg); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 1rem 0 0.3rem;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.src { font: 0.78rem/1.4 var(--f-mono); color: var(--muted); margin: 0 0 1rem; }
+.cm { color: var(--muted); }
+.kw { color: var(--felt); font-weight: 500; }
+.hl { color: var(--heart); }
+figure { margin: 1.6rem 0; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 10px; }
+.diagram svg { display: block; width: 100%; min-width: 620px; height: auto; color: var(--fg); }
+figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 0.55rem; max-width: 68ch; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 1.8rem 0 0.4rem; }
+.fact { border-top: 2px solid var(--felt); padding-top: 8px; }
+.fact b { display: block; font: 600 1.5rem/1.15 var(--f-display); font-variant-numeric: tabular-nums; }
+.fact span { font-size: 0.85rem; color: var(--muted); }
+.tablewrap { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.72rem/1.3 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+td.num { white-space: nowrap; }
+.verdict { font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 6px; border-radius: 3px; white-space: nowrap; }
+.v-keep { background: var(--felt-soft); color: var(--felt); }
+.v-drop { background: var(--heart-soft); color: var(--heart); }
+.note { border-left: 3px solid var(--felt); background: var(--felt-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 1.2rem 0; font-size: 0.95rem; }
+ol, ul { padding-left: 1.3rem; margin: 0.6rem 0; }
+li { margin: 0.3rem 0; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 0.85rem var(--f-mono); margin-top: 1.4rem; }
+.toc a { text-decoration: none; }
+.toc a:hover, .toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--felt); outline-offset: 2px; }
+svg text { font-family: var(--f-mono); }
+</style>
+
+<main>
+<header class="prose">
+  <div class="eyebrow">ddfast · src/solver.cpp</div>
+  <h1>ddfast Pattern Table</h1>
+  <p class="lede">How an exact double-dummy solver stores what it proved as card patterns, and checks eight of them against the current position in a handful of AVX-512 instructions.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#idea">The idea</a><a href="#key">Key and directory</a><a href="#entry">Entries</a><a href="#match">Matching a block</a><a href="#store">Storing</a><a href="#ddclaim">ddclaim's table</a><a href="#numbers">Why it pays</a><a href="#tried">Tried, not kept</a>
+  </nav>
+</header>
+
+<div class="facts">
+  <div class="fact"><b>4.3x</b><span>DDS's speed on 600 random deals (271 vs 63 deals/s). README</span></div>
+  <div class="fact"><b>16 / 24 B</b><span>per pattern: up to 7 cards a hand / 8 and more. solver.cpp</span></div>
+  <div class="fact"><b>8 patterns</b><span>tested per block with one load-and-compare sequence. solver.cpp</span></div>
+  <div class="fact"><b>~23%</b><span>of cycles in the table, about half memory latency. NOTES, round 9</span></div>
+</div>
+
+<section class="prose" id="idea">
+<h2>The idea</h2>
+<p>ddfast answers yes/no questions: "with this leader, can North-South take at least <code>target</code> of the remaining <code>n</code> tricks?" Every search node returns that answer plus <code>R</code>, the set of cards the proof depended on. If a proof only needed "North holds the ace and king of spades, East the queen", it holds for every position with the same suit lengths and leader where those cards (counted among the cards still in play) have those owners. Where the other cards sit does not matter.</p>
+<p>So a table entry is a <em>pattern</em>, not a position: a mask of the cards that mattered, their owners, and which targets the proof settles. One entry answers many positions. Finding the entry means testing each candidate pattern against the current hands, and that test is what ddfast vectorises: eight patterns at a time.</p>
+<p>The table is per deal. It is reset whenever the deal or the strain changes, and persists over the several target questions asked about one deal (2.39 questions per deal on average, NOTES "Final state (round 5)"). It is used from 4 cards a hand upward (<code>TT_MIN = 4</code>); smaller endings use ddclaim's 2- and 3-card tables and other cutoffs.</p>
+</section>
+
+<section class="prose" id="key">
+<h2>Key and directory</h2>
+<p>Patterns are grouped under an exact key: the length of every hand in three of the four suits (the fourth follows from the card count), the leader, and the cards per hand. That is 54 bits:</p>
+<pre><code><span class="kw">const</span> u64 key54 = lens48(LENS) | u64(L) &lt;&lt; 48 | u64(n) &lt;&lt; 50;</code></pre>
+<p class="src">solver.cpp, lead(). lens48 packs 12 bits (4 seats x 3 suits) per lane: 48 bits; leader 2 bits; n 4 bits.</p>
+<p>Because the key fixes every suit length in every hand, the cards still in play line up the same way for every position with that key once they are <em>compressed</em>: <code>pext</code> over the 52-bit set of cards present squeezes out the cards already played, so bit <em>i</em> of a compressed mask means "the <em>i</em>-th lowest remaining card", which is the same suit and relative rank in every position with this key. With 7 cards a hand there are at most 28 cards in play, so a compressed mask fits in 28 bits; from 8 cards it needs up to 52.</p>
+
+<h3>The directory</h3>
+<p>The key maps to a 16-byte <code>DirSlot</code> in an open-addressed (linear probing) array with a multiplicative hash:</p>
+<pre><code><span class="kw">struct</span> DirSlot {
+  u64 key;  <span class="cm">// key54 | hint &lt;&lt; 54 | count in the head block &lt;&lt; 60</span>
+  uint32_t gen, head;
+};
+<span class="kw">inline</span> DirSlot* find(u64 key54) {
+  size_t h = (key54 * 0x9E3779B97F4A7C15ull) &gt;&gt; (64 - bits);
+  <span class="kw">for</span> (;;) {
+    DirSlot&amp; d = dir[h];
+    <span class="kw">if</span> (d.gen != gen) <span class="kw">return</span> nullptr;
+    <span class="kw">if</span> ((d.key &amp; ((1ull &lt;&lt; 54) - 1)) == key54) <span class="kw">return</span> &amp;d;
+    h = (h + 1) &amp; ((size_t(1) &lt;&lt; bits) - 1);
+  }
+}</code></pre>
+<p class="src">solver.cpp, struct TT.</p>
+<ul>
+  <li><b>O(1) reset.</b> A slot is live only if its <code>gen</code> equals the table's. Resetting for a new deal is <code>++gen</code>; the directory is memset only when the 32-bit counter wraps.</li>
+  <li><b>Growth.</b> The directory starts at 2<sup>11</sup> slots (<code>DIR_MIN</code>) and, when it is half full, rehashes into 4x the size (<code>bits += 2</code>), up to 2<sup>20</sup> (<code>DIR_MAX</code>). Past that, or when the block pool is full, the whole table is reset; the notes report these paths checked exact with deliberately tiny tables.</li>
+  <li><b>Spare bits.</b> The top 10 bits of <code>key</code> carry a best-move hint (6 bits: the card's index among the cards present, 63 for none) and the number of patterns used in the newest block (4 bits, 0-8).</li>
+</ul>
+
+<h3>Chains of blocks from a per-deal pool</h3>
+<p><code>head</code> points into a pool of 64-byte lines (2<sup>22</sup> lines, <code>POOL_BITS</code>) handed out in order. A block is 8 patterns: 2 lines for narrow entries, 3 for wide. When the head block is full, a new block is taken from the pool and pushed on the front of the key's chain; a parallel array <code>next[]</code> links it to the older one. Nothing is ever evicted during a deal, and a deal's table is one compact, growing region. Huge pages are requested for the directory, pool and links with <code>madvise</code>.</p>
+</section>
+
+<figure>
+<div class="diagram">
+<svg viewBox="0 0 760 250" role="img" aria-label="A directory slot with key, generation and head index points to the newest block in the pool; each block links through next[] to the older block of the same key until NIL.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+  </defs>
+  <text x="20" y="24" font-size="12" fill="currentColor" font-weight="600">directory (16-byte slots, open addressing)</text>
+  <rect x="20" y="36" width="210" height="26" fill="none" stroke="currentColor" stroke-opacity="0.35"/>
+  <text x="125" y="54" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.6">other key</text>
+  <rect x="20" y="62" width="210" height="44" fill="var(--felt-soft)" stroke="var(--felt)" stroke-width="1.5"/>
+  <text x="30" y="80" font-size="11" fill="currentColor">key54 | hint | cnt</text>
+  <text x="30" y="98" font-size="11" fill="currentColor">gen = tt.gen   head</text>
+  <rect x="20" y="106" width="210" height="26" fill="none" stroke="currentColor" stroke-opacity="0.35"/>
+  <text x="125" y="124" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.6">stale gen = empty</text>
+  <text x="20" y="160" font-size="11" fill="currentColor" opacity="0.75">h = (key54 * 0x9E37…15) &gt;&gt; (64 - bits)</text>
+  <text x="20" y="178" font-size="11" fill="currentColor" opacity="0.75">probe h, h+1, … until gen differs</text>
+
+  <text x="290" y="24" font-size="12" fill="currentColor" font-weight="600">pool (64-byte lines, handed out in order, reset per deal)</text>
+  <!-- newest block -->
+  <rect x="290" y="62" width="200" height="44" fill="var(--surface)" stroke="currentColor"/>
+  <text x="390" y="80" font-size="11" fill="currentColor" text-anchor="middle">newest block (cnt used)</text>
+  <text x="390" y="98" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.7">8 patterns</text>
+  <!-- older -->
+  <rect x="540" y="62" width="200" height="44" fill="var(--surface)" stroke="currentColor"/>
+  <text x="640" y="80" font-size="11" fill="currentColor" text-anchor="middle">older block (full)</text>
+  <text x="640" y="98" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.7">8 patterns</text>
+  <rect x="540" y="150" width="200" height="44" fill="var(--surface)" stroke="currentColor"/>
+  <text x="640" y="168" font-size="11" fill="currentColor" text-anchor="middle">oldest block (full)</text>
+  <text x="640" y="186" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.7">8 patterns</text>
+  <text x="640" y="236" font-size="11" fill="currentColor" text-anchor="middle">NIL</text>
+
+  <line x1="230" y1="96" x2="288" y2="90" stroke="currentColor" marker-end="url(#ar)"/>
+  <text x="259" y="112" font-size="10" fill="currentColor" text-anchor="middle">head</text>
+  <line x1="490" y1="84" x2="538" y2="84" stroke="currentColor" marker-end="url(#ar)"/>
+  <text x="514" y="76" font-size="10" fill="currentColor" text-anchor="middle">next[]</text>
+  <line x1="640" y1="106" x2="640" y2="148" stroke="currentColor" marker-end="url(#ar)"/>
+  <text x="648" y="132" font-size="10" fill="currentColor">next[]</text>
+  <line x1="640" y1="194" x2="640" y2="222" stroke="currentColor" marker-end="url(#ar)"/>
+  <text x="648" y="212" font-size="10" fill="currentColor">next[]</text>
+
+  <rect x="290" y="150" width="200" height="44" fill="none" stroke="var(--felt)" stroke-dasharray="4 3"/>
+  <text x="390" y="168" font-size="11" fill="var(--felt)" text-anchor="middle">store when cnt == 8:</text>
+  <text x="390" y="186" font-size="11" fill="var(--felt)" text-anchor="middle">new block becomes head</text>
+  <text x="390" y="230" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.75">lookup walks newest → oldest</text>
+</svg>
+</div>
+<figcaption>Figure 1. One key, one chain. The directory slot holds the head of a singly linked list of 8-pattern blocks; new blocks go on the front, so a lookup sees the most recent patterns first. A slot whose <code>gen</code> is stale reads as empty, which is how the table resets in O(1).</figcaption>
+</figure>
+
+<section class="prose" id="entry">
+<h2>What an entry holds</h2>
+<p>Owners are encoded with two bit strings over the cards present, computed once per node:</p>
+<pre><code><span class="kw">const</span> u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);</code></pre>
+<p class="src">solver.cpp. Seats N E S W are 0..3 (include/ddfast.hpp). <code>bm_.ext</code> is pext over <code>all</code>, the cards present.</p>
+<p>A card's bit in <code>ewq</code> is set if East or West holds it, in <code>swq</code> if South or West does, so the pair (ewq, swq) is the seat number: N = 00, E = 10, S = 01, W = 11. A pattern stores its mask <code>m</code> and the two strings ANDed with <code>m</code>. It matches the current position when <code>(ewq &amp; m, swq &amp; m)</code> equal the stored strings: every card that mattered has the same owner. Since the key fixes the suit lengths, cards outside the mask can be anywhere.</p>
+
+<h3>Narrow entries: up to 7 cards a hand, 16 bytes</h3>
+<p>With at most 28 cards present, both owner strings fit in one word side by side (<code>own = ewq | swq &lt;&lt; 28</code>). The second word holds the mask, doubled to line up with both halves, plus 8 bits of verdict. Instead of lower and upper bounds on North-South's tricks, a narrow entry stores the set of targets it decides: an entry from <code>tt_store</code> either says "reaches <code>target</code>", which settles every <em>t</em> &le; target, or "does not reach it", which settles every <em>t</em> &ge; target. One bit per target 1..7 at bit 55 + <em>t</em>, and the answer at bit 63. This replaced lo/hi in round 9 and turns the bound check into one <code>vptestmq</code>.</p>
+
+<h3>Wide entries: 8 or more cards a hand, 24 bytes</h3>
+<p>Up to 52 cards present means each owner string needs its own word. <code>w0</code> holds the 52-bit mask with <code>lo</code> in bits 52-55 and <code>hi</code> in 56-59 (bounds on North-South's tricks; a stored "yes" is [target, n], a "no" is [0, target-1]); <code>w1</code> and <code>w2</code> hold the masked owner strings. The entry decides the question if <code>lo &ge; target</code> (yes) or <code>hi &lt; target</code> (no).</p>
+</section>
+
+<figure>
+<div class="diagram">
+<svg viewBox="0 0 760 420" role="img" aria-label="Bit layouts. Narrow entry: word a holds the two 28-bit masked owner strings; word b holds the mask twice, seven decided-target bits and the answer bit. Wide entry: w0 holds a 52-bit mask, lo and hi; w1 and w2 hold the masked owner strings. Blocks store the eight entries' words as separate 64-byte lines.">
+  <!-- scale: bit b spans x = 100 + (63-b)*10 .. +10 -->
+  <text x="100" y="20" font-size="10" fill="currentColor" opacity="0.7">bit 63</text>
+  <text x="740" y="20" font-size="10" fill="currentColor" text-anchor="end" opacity="0.7">bit 0</text>
+  <text x="180" y="20" font-size="10" fill="currentColor" text-anchor="middle" opacity="0.7">56</text>
+  <text x="460" y="20" font-size="10" fill="currentColor" text-anchor="middle" opacity="0.7">28</text>
+  <text x="20" y="44" font-size="12" font-weight="600" fill="var(--felt)">NARROW</text>
+
+  <text x="92" y="66" font-size="12" fill="currentColor" text-anchor="end">a</text>
+  <rect x="100" y="50" width="80" height="26" fill="none" stroke="currentColor" stroke-opacity="0.5"/>
+  <text x="140" y="67" font-size="11" fill="currentColor" text-anchor="middle" opacity="0.6">0</text>
+  <rect x="180" y="50" width="280" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+  <text x="320" y="67" font-size="11" fill="currentColor" text-anchor="middle">swq &amp; m  (S/W owner bits)</text>
+  <rect x="460" y="50" width="280" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+  <text x="600" y="67" font-size="11" fill="currentColor" text-anchor="middle">ewq &amp; m  (E/W owner bits)</text>
+
+  <text x="92" y="102" font-size="12" fill="currentColor" text-anchor="end">b</text>
+  <rect x="100" y="86" width="10" height="26" fill="var(--heart-soft)" stroke="var(--heart)"/>
+  <rect x="110" y="86" width="70" height="26" fill="var(--heart-soft)" stroke="var(--heart)"/>
+  <text x="145" y="103" font-size="10" fill="var(--heart)" text-anchor="middle">t=7 … 1</text>
+  <rect x="180" y="86" width="280" height="26" fill="none" stroke="currentColor"/>
+  <text x="320" y="103" font-size="11" fill="currentColor" text-anchor="middle">m  (cards that mattered)</text>
+  <rect x="460" y="86" width="280" height="26" fill="none" stroke="currentColor"/>
+  <text x="600" y="103" font-size="11" fill="currentColor" text-anchor="middle">m  (same mask again)</text>
+  <text x="105" y="128" font-size="10" fill="var(--heart)" text-anchor="middle">ans</text>
+  <text x="300" y="128" font-size="10" fill="currentColor" opacity="0.7">bit 63 = answer; bit 55+t set ⇔ entry decides target t</text>
+
+  <text x="20" y="166" font-size="12" font-weight="600" fill="var(--felt)">WIDE</text>
+  <text x="220" y="166" font-size="10" fill="currentColor" text-anchor="middle" opacity="0.7">52</text>
+  <text x="92" y="188" font-size="12" fill="currentColor" text-anchor="end">w0</text>
+  <rect x="100" y="172" width="40" height="26" fill="none" stroke="currentColor" stroke-opacity="0.5"/>
+  <rect x="140" y="172" width="40" height="26" fill="var(--heart-soft)" stroke="var(--heart)"/>
+  <text x="160" y="189" font-size="10" fill="var(--heart)" text-anchor="middle">hi</text>
+  <rect x="180" y="172" width="40" height="26" fill="var(--heart-soft)" stroke="var(--heart)"/>
+  <text x="200" y="189" font-size="10" fill="var(--heart)" text-anchor="middle">lo</text>
+  <rect x="220" y="172" width="520" height="26" fill="none" stroke="currentColor"/>
+  <text x="480" y="189" font-size="11" fill="currentColor" text-anchor="middle">m  (up to 52 cards present)</text>
+  <text x="92" y="222" font-size="12" fill="currentColor" text-anchor="end">w1</text>
+  <rect x="100" y="206" width="120" height="26" fill="none" stroke="currentColor" stroke-opacity="0.5"/>
+  <rect x="220" y="206" width="520" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+  <text x="480" y="223" font-size="11" fill="currentColor" text-anchor="middle">ewq &amp; m</text>
+  <text x="92" y="256" font-size="12" fill="currentColor" text-anchor="end">w2</text>
+  <rect x="100" y="240" width="120" height="26" fill="none" stroke="currentColor" stroke-opacity="0.5"/>
+  <rect x="220" y="240" width="520" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+  <text x="480" y="257" font-size="11" fill="currentColor" text-anchor="middle">swq &amp; m</text>
+
+  <!-- block layout -->
+  <text x="20" y="302" font-size="12" font-weight="600" fill="currentColor">BLOCK = 8 entries, stored by word (structure of arrays)</text>
+  <text x="92" y="333" font-size="11" fill="currentColor" text-anchor="end">narrow</text>
+  <g font-size="10" fill="currentColor" text-anchor="middle">
+    <rect x="100" y="316" width="300" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+    <text x="250" y="333">line 0: a[0] a[1] … a[7]  (e[0..7])</text>
+    <rect x="410" y="316" width="300" height="26" fill="none" stroke="currentColor"/>
+    <text x="560" y="333">line 1: b[0] … b[7]  (e[8..15])</text>
+  </g>
+  <text x="92" y="373" font-size="11" fill="currentColor" text-anchor="end">wide</text>
+  <g font-size="10" fill="currentColor" text-anchor="middle">
+    <rect x="100" y="356" width="196" height="26" fill="none" stroke="currentColor"/>
+    <text x="198" y="373">line 0: w0[0..7]</text>
+    <rect x="306" y="356" width="196" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+    <text x="404" y="373">line 1: w1[0..7]</text>
+    <rect x="512" y="356" width="196" height="26" fill="var(--felt-soft)" stroke="currentColor"/>
+    <text x="610" y="373">line 2: w2[0..7]</text>
+  </g>
+  <text x="100" y="404" font-size="10" fill="currentColor" opacity="0.7">each line is one zmm load. Empty slot: narrow a = ~0, b = 0; wide w0 = 0, w1 = w2 = ~0. Neither can ever match.</text>
+</svg>
+</div>
+<figcaption>Figure 2. Entry formats and block layout. Storing the eight <code>a</code> words in one cache line and the eight <code>b</code> words in the next means each 64-byte line is exactly one 512-bit register of eight lanes.</figcaption>
+</figure>
+
+<section class="prose" id="match">
+<h2>Matching a block</h2>
+<p>The narrow test, for all 8 entries at once, is <code>(b &amp; own) == a</code> and <code>b &amp; dec != 0</code>, where <code>dec = 1 &lt;&lt; (55 + target)</code>. Because <code>own</code> only has bits 0-55, the AND strips b's verdict bits and leaves the masked owners. An empty slot (<code>a = ~0</code>) can never equal anything ANDed with own.</p>
+<pre><code><span class="kw">inline unsigned</span> tt_match_narrow(<span class="kw">const</span> u64* e, u64 own, u64 dec) {
+  <span class="kw">const</span> __m512i vb = _mm512_load_si512(e + 8);
+  <span class="kw">const unsigned</span> k = _mm512_cmpeq_epi64_mask(
+      _mm512_and_si512(vb, _mm512_set1_epi64((<span class="kw">long long</span>)own)), _mm512_load_si512(e));
+  <span class="kw">return</span> k &amp; _mm512_test_epi64_mask(vb, _mm512_set1_epi64((<span class="kw">long long</span>)dec));
+}</code></pre>
+<p class="src">solver.cpp. Two loads, <code>vpandq</code>, <code>vpcmpeqq</code>, <code>vptestmq</code>, a mask AND. The broadcasts of <code>own</code> and <code>dec</code> do not change along the chain, so the compiler can hoist them.</p>
+<p>The wide version does the same on three lines: mask out <code>lo</code>/<code>hi</code> from <code>w0</code>, compare <code>w0 &amp; ewq</code> to <code>w1</code> and <code>w0 &amp; swq</code> to <code>w2</code>, and test the bounds with two shifts, two masks and two compares:</p>
+<pre><code><span class="kw">return</span> k &amp; (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));</code></pre>
+<p class="src">solver.cpp, tt_match_wide. On ARM the same functions run on four 2-lane NEON vectors and a movemask.</p>
+
+<h3>Choosing the narrowest match</h3>
+<p>Any deciding entry gives a correct answer, but the entry also returns <code>R</code>, the cards the answer depended on, which the parent node folds into its own pattern. Fewer cards in <code>R</code> make the parent's pattern more general. So when more than one lane matches (<code>kd &amp; (kd - 1)</code>), ddfast picks the entry with the fewest mask bits, packing popcount and lane index into one key and taking a masked minimum:</p>
+<pre><code><span class="kw">inline</span> u64 tt_min_pc(<span class="kw">const</span> u64* v, u64 m, <span class="kw">unsigned</span> kd) {
+  <span class="kw">const</span> __m512i pcv = _mm512_or_si512(
+      _mm512_slli_epi64(_mm512_popcnt_epi64(_mm512_and_si512(_mm512_load_si512(v), _mm512_set1_epi64((<span class="kw">long long</span>)m))), 3),
+      _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
+  <span class="kw">return</span> _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
+}</code></pre>
+<p class="src">solver.cpp. Called with the <code>b</code> line and <code>m = 0xFFFFFFF</code> (narrow) or the <code>w0</code> line and <code>W52</code> (wide). The result is <code>popcount &lt;&lt; 3 | lane</code>; ties go to the lowest lane.</p>
+<p>The lookup stops at the first block with any deciding entry (<code>TTPICK=1</code>, the default); it does not search later blocks for a narrower one. The chosen mask is expanded back to card bits and widened so that every card above a relevant card in its suit counts too:</p>
+<pre><code>R = fill_up(ddport::pdep64(bb &amp; 0xFFFFFFF, all));
+<span class="kw">return</span> bb &gt;&gt; 63;</code></pre>
+</section>
+
+<figure>
+<div class="diagram">
+<svg viewBox="0 0 760 400" role="img" aria-label="Eight lanes of one block pass through AND with the broadcast owners, compare with the stored owners, and a test against the target bit. Lanes 1, 4 and 6 match; lanes 1 and 4 also decide. Popcount of the mask picks lane 4.">
+  <g font-size="11" fill="currentColor">
+    <text x="20" y="24" font-weight="600">lane</text>
+    <text x="236" y="24" text-anchor="middle">0</text><text x="296" y="24" text-anchor="middle">1</text><text x="356" y="24" text-anchor="middle">2</text><text x="416" y="24" text-anchor="middle">3</text>
+    <text x="476" y="24" text-anchor="middle">4</text><text x="536" y="24" text-anchor="middle">5</text><text x="596" y="24" text-anchor="middle">6</text><text x="656" y="24" text-anchor="middle">7</text>
+  </g>
+  <!-- row labels -->
+  <g font-size="11" fill="currentColor">
+    <text x="20" y="58">vb = load b-line</text>
+    <text x="20" y="74" opacity="0.6" font-size="10">mask | verdict</text>
+    <text x="20" y="114">vb &amp; own == a</text>
+    <text x="20" y="130" opacity="0.6" font-size="10">vpandq, vpcmpeqq</text>
+    <text x="20" y="170">vb tests dec</text>
+    <text x="20" y="186" opacity="0.6" font-size="10">vptestmq</text>
+    <text x="20" y="226">kd = k &amp; t</text>
+    <text x="20" y="242" opacity="0.6" font-size="10">kandb</text>
+    <text x="20" y="282">popcnt(b &amp; m)&lt;&lt;3 | i</text>
+    <text x="20" y="298" opacity="0.6" font-size="10">vpopcntq, vpsllq, vporq</text>
+    <text x="20" y="338">masked min over kd</text>
+    <text x="20" y="354" opacity="0.6" font-size="10">reduce_min_epu64</text>
+  </g>
+  <!-- row 1: b words -->
+  <g font-size="10" fill="currentColor" text-anchor="middle">
+    <rect x="210" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="236" y="63">empty</text>
+    <rect x="270" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="296" y="63">5 cards</text>
+    <rect x="330" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="356" y="63">3 cards</text>
+    <rect x="390" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="416" y="63">6 cards</text>
+    <rect x="450" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="476" y="63">3 cards</text>
+    <rect x="510" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="536" y="63">4 cards</text>
+    <rect x="570" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="596" y="63">2 cards</text>
+    <rect x="630" y="44" width="52" height="30" fill="none" stroke="currentColor"/><text x="656" y="63">empty</text>
+  </g>
+  <!-- row 2: owners match -->
+  <g font-size="12" text-anchor="middle" font-weight="600">
+    <text x="236" y="120" fill="currentColor" opacity="0.4">0</text>
+    <text x="296" y="120" fill="var(--felt)">1</text>
+    <text x="356" y="120" fill="currentColor" opacity="0.4">0</text>
+    <text x="416" y="120" fill="currentColor" opacity="0.4">0</text>
+    <text x="476" y="120" fill="var(--felt)">1</text>
+    <text x="536" y="120" fill="currentColor" opacity="0.4">0</text>
+    <text x="596" y="120" fill="var(--felt)">1</text>
+    <text x="656" y="120" fill="currentColor" opacity="0.4">0</text>
+  </g>
+  <!-- row 3: decides target -->
+  <g font-size="12" text-anchor="middle" font-weight="600">
+    <text x="236" y="176" fill="currentColor" opacity="0.4">0</text>
+    <text x="296" y="176" fill="var(--heart)">1</text>
+    <text x="356" y="176" fill="var(--heart)">1</text>
+    <text x="416" y="176" fill="currentColor" opacity="0.4">0</text>
+    <text x="476" y="176" fill="var(--heart)">1</text>
+    <text x="536" y="176" fill="var(--heart)">1</text>
+    <text x="596" y="176" fill="currentColor" opacity="0.4">0</text>
+    <text x="656" y="176" fill="currentColor" opacity="0.4">0</text>
+  </g>
+  <!-- row 4: kd -->
+  <g font-size="12" text-anchor="middle" font-weight="600">
+    <text x="236" y="232" fill="currentColor" opacity="0.4">0</text>
+    <rect x="276" y="214" width="40" height="26" fill="var(--felt-soft)" stroke="var(--felt)"/><text x="296" y="232" fill="var(--felt)">1</text>
+    <text x="356" y="232" fill="currentColor" opacity="0.4">0</text>
+    <text x="416" y="232" fill="currentColor" opacity="0.4">0</text>
+    <rect x="456" y="214" width="40" height="26" fill="var(--felt-soft)" stroke="var(--felt)"/><text x="476" y="232" fill="var(--felt)">1</text>
+    <text x="536" y="232" fill="currentColor" opacity="0.4">0</text>
+    <text x="596" y="232" fill="currentColor" opacity="0.4">0</text>
+    <text x="656" y="232" fill="currentColor" opacity="0.4">0</text>
+  </g>
+  <!-- row 5: keys -->
+  <g font-size="11" text-anchor="middle" fill="currentColor">
+    <text x="296" y="288">5·8+1 = 41</text>
+    <text x="476" y="288">3·8+4 = 28</text>
+  </g>
+  <!-- row 6: winner -->
+  <rect x="446" y="322" width="60" height="28" fill="var(--heart-soft)" stroke="var(--heart)" stroke-width="1.5"/>
+  <text x="476" y="341" font-size="12" text-anchor="middle" fill="var(--heart)" font-weight="600">28 → lane 4</text>
+  <line x1="476" y1="296" x2="476" y2="318" stroke="var(--heart)" marker-end="url(#ar2)"/>
+  <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--heart)"/></marker></defs>
+  <text x="20" y="386" font-size="10" fill="currentColor" opacity="0.7">Illustrative values. Lane 6 has the right owners but its verdict does not cover this target; lane 2 covers the target but a relevant card has moved.</text>
+</svg>
+</div>
+<figcaption>Figure 3. The match step on one narrow block. Owner equality and the target test each produce an 8-bit mask; their AND is the set of entries that decide the question here. With two or more survivors, the popcount key picks the most general one. A single survivor skips the popcount (<code>__builtin_ctz(kd)</code>).</figcaption>
+</figure>
+
+<section class="prose" id="store">
+<h2>Storing a result</h2>
+<p><code>tt_store</code> runs when a node finishes, and also when the DDS-derived quick-trick bounds or ddclaim's 4-card pattern table settle a node, because finding the answer again in this table is cheaper than recomputing it (comments in solver.cpp). It appends to the key's newest block; patterns are never tightened in place or deduplicated.</p>
+<pre><code><span class="kw">const</span> u64 m = ddport::pext64(Racc, all);   <span class="cm">// cards that mattered, compressed</span>
+...
+<span class="kw">const</span> u64 mm = m | m &lt;&lt; 28;
+e[cnt] = (ewq | swq &lt;&lt; 28) &amp; mm;
+<span class="cm">// Bit 55 + t: the entry decides target t (1..7); bit 63: the answer.</span>
+<span class="kw">const</span> u64 dec = res ? (1ull &lt;&lt; target) - 1 : 0x7Full &amp; ~((1ull &lt;&lt; (target - 1)) - 1);
+e[8 + cnt] = mm | dec &lt;&lt; 56 | u64(res) &lt;&lt; 63;</code></pre>
+<p class="src">solver.cpp, tt_store (narrow branch). The wide branch writes <code>m | lo &lt;&lt; 52 | hi &lt;&lt; 56</code>, <code>ewq &amp; m</code>, <code>swq &amp; m</code>.</p>
+<p>If the node found a best card, its index among the cards present (<code>popc(all &amp; (bestc - 1))</code>) goes into the slot's 6-bit hint. A lookup that misses still returns that hint, and move ordering tries it first.</p>
+</section>
+
+<section class="prose" id="ddclaim">
+<h2>The same scheme in ddclaim's 4-card table</h2>
+<p>ddfast also reads ddclaim's precomputed pattern table for 4-card endings (filled by solving random endings, then frozen). Its entries use the same <code>a</code>/<code>b</code> split with 8-entry groups, but keep 3-bit lo/hi bounds in bits 56-58 and 59-61, and its key is leader-relative with the side suits sorted. Its match is the narrow test with the bounds test of the wide one:</p>
+<pre><code><span class="kw">inline unsigned</span> pmatch8(<span class="kw">const</span> u64* a, <span class="kw">const</span> u64* b, u64 own, <span class="kw">int</span> tl) {
+  ...
+  <span class="kw">const unsigned</span> k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, vo), _mm512_load_si512(a));
+  <span class="kw">const</span> __m512i vlo = _mm512_and_si512(_mm512_srli_epi64(vb, 56), _mm512_set1_epi64(7));
+  <span class="kw">const</span> __m512i vhi = _mm512_and_si512(_mm512_srli_epi64(vb, 59), _mm512_set1_epi64(7));
+  <span class="kw">return</span> k &amp; (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));
+}</code></pre>
+<p class="src">ddclaim, include/ddclaim/port.hpp, called from probe_pattern in include/ddclaim/tables.hpp.</p>
+<p>Differences that follow from the table being read-only and large: the directory points to a contiguous run of groups (all <code>a</code> lines, then all <code>b</code> lines), not a chain; <code>probe_pattern</code> prefetches 8 groups at a time (<code>P_CHUNK</code>); it takes the first deciding entry (choosing the narrowest there, <code>PPICK=1</code>, saved only 0.26% of nodes and was left off, NOTES round 7). A 4-card hit is copied into the per-deal table, which cut 4-card probes from 6.2M to 1.7M per 600 deals and saved 3% (NOTES round 3).</p>
+</section>
+
+<section class="prose" id="numbers">
+<h2>Why it pays</h2>
+<p>The table's design came out of one finding: on full deals the solver's node count was limited by how many patterns it could keep per key, not by move ordering. All figures below are from <code>docs/NOTES.md</code>, measured on the public set of 600 random deals unless noted.</p>
+</section>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Change</th><th>Effect</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>One 8-pattern bucket per suit-length key (shared table)</td><td class="num">80% of stores evicted a live entry</td><td>Round 2</td></tr>
+<tr><td>Chain 4 buckets per key / 16 buckets</td><td class="num">374M → 165M / 130M nodes (DDS: 138M search calls)</td><td>Round 2</td></tr>
+<tr><td>Per-deal directory, chains from a pool, never evicts; 16 B / 24 B entries</td><td class="num">123M nodes, 9.8-10.7 ms/deal</td><td>Round 2</td></tr>
+<tr><td>Probe the table before DDS-style quick tricks</td><td class="num">half of lookups hit; 9.7 → 7.0-7.7 ms</td><td>Round 3</td></tr>
+<tr><td>Narrowest deciding entry within the hit block (TTPICK=1)</td><td class="num">nodes -3.3%, cycles -1.5%</td><td>Round 7</td></tr>
+<tr><td>Decided-target mask in narrow entries (one vptestmq)</td><td class="num">instructions 46.07M → 45.67M, cycles -1.1%</td><td>Round 9</td></tr>
+<tr><td>Huge pages (all tables)</td><td class="num">about 2% of cycles</td><td>Round B</td></tr>
+</tbody>
+</table>
+</div>
+
+<section class="prose">
+<p><b>Blocks scanned.</b> Hits scan 1.2 blocks at <em>n</em> = 4, 2.2 at <em>n</em> = 6 and 2.7 at <em>n</em> = 7; misses scan 3.3 blocks at <em>n</em> = 6 (NOTES round 9). A typical lookup is a directory probe plus two or three dependent block loads.</p>
+<p><b>Cost.</b> In round 9's profile <code>tt_lookup</code> and <code>TT::find</code> took 21% of samples and <code>tt_store</code> 4.3%; the table was "the biggest single cost (~23% of cycles, about half memory latency)". Earlier gprof runs put the lookup at 13% (rounds 3 and 5). A double-call measurement gave the lookup +6.5M instructions and +1.9M cycles per deal.</p>
+<p><b>End result.</b> The README reports 271 deals/s against DDS's 63 (4.3x) on single problems and 16.1M cycles per deal on the public set. The final notes report 84,841,515 nodes on the public set (141.4k per deal), against 230,000 DDS search calls per deal measured in round 5. Those gains come from the whole solver, not the table alone.</p>
+</section>
+
+<section class="prose" id="tried">
+<h2>Tried and not kept</h2>
+<p>The table's remaining cost is mostly memory latency, and the obvious latency fixes did not help. Cycles are per deal on the public set.</p>
+</section>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Attempt</th><th>Result</th><th></th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Prefetch the pattern-table directory and entries early in the node</td><td>no gain: "the search has no slack to hide a memory miss"</td><td><span class="verdict v-drop">dropped</span></td><td>Round 3</td></tr>
+<tr><td>Interleave 2-8 deals on one thread, each with its own table</td><td>9.7 ms (1) vs 10.8, 13.0, 12.5 ms (2, 4, 8)</td><td><span class="verdict v-drop">dropped</span></td><td>Round 3</td></tr>
+<tr><td>First two patterns of a key inside a 64-byte directory slot</td><td>27.1M vs 25.0-25.6M: directory 4x larger, out of cache</td><td><span class="verdict v-drop">dropped</span></td><td>Round 5</td></tr>
+<tr><td>4-pattern single-line blocks for &le; 7 cards</td><td>25.6M, no gain</td><td><span class="verdict v-drop">dropped</span></td><td>Round 5</td></tr>
+<tr><td>Tighten a matching pattern in place instead of appending</td><td>26.2M vs 25.8M</td><td><span class="verdict v-drop">dropped</span></td><td>Round 5</td></tr>
+<tr><td>Scan every block for the narrowest entry (TTPICK=2)</td><td>nodes -4.4% but cycles +2.7%</td><td><span class="verdict v-drop">off</span></td><td>Round 7</td></tr>
+<tr><td>Narrowest pick with a scalar loop on every hit</td><td>+1% cycles (the vector version replaced it)</td><td><span class="verdict v-keep">rewritten</span></td><td>Round 7</td></tr>
+<tr><td>Prefetch the next lead's directory slot from the last follow node</td><td>20.33M → 20.58-20.69M</td><td><span class="verdict v-drop">dropped</span></td><td>Round 9</td></tr>
+<tr><td>Prefetch the next block of the chain while scanning</td><td>no difference within noise</td><td><span class="verdict v-drop">dropped</span></td><td>Round 9</td></tr>
+<tr><td>Newest block inside a 256-byte directory slot (no dependent load)</td><td>cycles equal (18.30M vs 18.32M); cache misses 47.6k → 75.5k per deal</td><td><span class="verdict v-drop">dropped</span></td><td>Round 9</td></tr>
+<tr><td>Directory filled to 3/4 instead of 1/2</td><td>worse (18.51M)</td><td><span class="verdict v-drop">dropped</span></td><td>Round 9</td></tr>
+<tr><td>Per-slot lo/hi summary to skip chains that cannot decide</td><td>would skip only 2-9% of misses (measured first)</td><td><span class="verdict v-drop">not built</span></td><td>Round 9</td></tr>
+</tbody>
+</table>
+</div>
+
+<section class="prose">
+<div class="note">Round 11 adds why the first-block-in-slot idea cannot be revisited cheaply: since the lookup takes the matching entry with the fewest cards, keeping node counts identical would require scanning the whole first block anyway.</div>
+
+<h2>Reimplementing it: the checklist</h2>
+<ol>
+  <li>Make every search return the set of cards its proof used; widen it so higher cards in the same suit count too (<code>fill_up</code>).</li>
+  <li>Key on exact suit lengths per hand, leader and card count. Compress masks and owners over the cards present with <code>pext</code>.</li>
+  <li>Encode owners as two bit strings (E|W, S|W) so the match is AND-and-compare.</li>
+  <li>Store 8 entries per block as separate 64-byte lines per word, so one lane equals one entry.</li>
+  <li>Pack the verdict into spare high bits: a decided-target mask for small endings, lo/hi when owners take whole words.</li>
+  <li>Never evict within a deal: per-deal pool, chained blocks, generation-tagged open-addressed directory.</li>
+  <li>On a multi-lane hit, return the entry with the fewest relevant cards.</li>
+</ol>
+</section>
+</main>
+
+</html>
