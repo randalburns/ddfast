@@ -1,6 +1,6 @@
 # ddfast
 
-ddfast is a performance optimisation of the search algorithms of
+ddfast is a performance optimization of the search algorithms of
 [DDS](https://github.com/dds-bridge/dds), the widely used exact double-dummy solver for bridge.
 Given four 13-card hands, a strain and a declarer, it returns the number of tricks declarer's
 side takes with best play by both sides, the same answer as DDS, about four times faster on
