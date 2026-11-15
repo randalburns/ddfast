@@ -20,18 +20,17 @@ design and the full measurement history.
 ## Design explainers
 
 Two illustrated explainers of the techniques behind the speed, for programmers who know C++
-and bridge basics:
+and bridge basics ([all design pages](https://randalburns.github.io/ddfast/)):
 
-- **One word per hand**: each hand as a single 64-bit word, 16 bits per suit, and the card
-  logic (following suit, trick winners, one card per run of touching cards, the cards that
-  decided a result) as a few bit operations.
-  [design/hand-words.md](design/hand-words.md) ·
-  [online](https://claude.ai/artifact/PT2Lp9JFG5WLgbka1xQH5X)
-- **The pattern table search**: the per-deal transposition table of card patterns, its
-  directory and blocks, and how AVX-512 matches a block of 8 stored patterns against a
-  position in a few instructions.
-  [design/table-search.md](design/table-search.md) ·
-  [online](https://claude.ai/artifact/A7t2ALbDcXRoV8jwKh17HV)
+- **[One word per hand](https://randalburns.github.io/ddfast/hand-words.html)**: each hand as
+  a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners,
+  one card per run of touching cards, the cards that decided a result) as a few bit
+  operations.
+- **[The pattern table search](https://randalburns.github.io/ddfast/table-search.html)**: the
+  per-deal transposition table of card patterns, its directory and blocks, and how AVX-512
+  matches a block of 8 stored patterns against a position in a few instructions.
+
+The pages are published from the `gh-pages` branch; plain Markdown versions are in `design/`.
 
 ## Speed
 
