@@ -30,7 +30,7 @@ and bridge basics ([all design pages](https://randalburns.github.io/ddfast/)):
   per-deal transposition table of card patterns, its directory and blocks, and how AVX-512
   matches a block of 8 stored patterns against a position in a few instructions.
 
-The pages are published from the `gh-pages` branch; plain Markdown versions are in `design/`.
+The pages are published from the `gh-pages` branch.
 
 ## Speed
 
@@ -247,7 +247,6 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
-| `design/` | illustrated explainers of the hand representation and the table search (Markdown, diagrams in `design/img/`) |
 
 ## License
 
