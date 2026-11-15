@@ -25,16 +25,13 @@ and bridge basics:
 - **One word per hand**: each hand as a single 64-bit word, 16 bits per suit, and the card
   logic (following suit, trick winners, one card per run of touching cards, the cards that
   decided a result) as a few bit operations.
-  [design/hand-words.html](design/hand-words.html) ·
+  [design/hand-words.md](design/hand-words.md) ·
   [online](https://claude.ai/artifact/PT2Lp9JFG5WLgbka1xQH5X)
 - **The pattern table search**: the per-deal transposition table of card patterns, its
   directory and blocks, and how AVX-512 matches a block of 8 stored patterns against a
   position in a few instructions.
-  [design/table-search.html](design/table-search.html) ·
+  [design/table-search.md](design/table-search.md) ·
   [online](https://claude.ai/artifact/A7t2ALbDcXRoV8jwKh17HV)
-
-The files in `design/` are self-contained HTML pages: download one and open it in a browser
-(GitHub shows the source rather than the page).
 
 ## Speed
 
@@ -251,7 +248,7 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
-| `design/` | illustrated explainers of the hand representation and the table search |
+| `design/` | illustrated explainers of the hand representation and the table search (Markdown, diagrams in `design/img/`) |
 
 ## License
 
