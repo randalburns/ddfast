@@ -95,12 +95,16 @@ ddfast needs two of ddclaim's table files: the 3-card table (`t3_v2.bin`, 377 MB
 4-card pattern table (`p4_v5.ent` and `.idx`, 758 MB). `init()` reads them from the directory
 it is given, else `$DDCLAIM_DIR`, else `build/ddclaim` under the current directory, and if
 they are missing builds them there first (once): about 10 seconds for the 3-card table (on 8 cores) and up
-to 170 seconds for the pattern table, on all cores, using up to about 5 GB of memory. To
-build them ahead of time:
+to 170 seconds for the pattern table, on all cores, using up to about 5 GB of memory. So
+the first call of `init()` builds them, whatever it is asked to solve: running `bin/ddfast` on
+any deal (or any program that calls `init()`) builds all the tables ddfast needs. To build them
+ahead of time, solve one deal; which deal does not matter:
 
 ```sh
 echo 'N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85' | bin/ddfast
 ```
+
+The 2-card table is not a file: it is built in memory by every `init()`, in a moment.
 
 ddfast asks ddclaim for the 4-card pattern level only (`DDCLAIM_LEVELS` overrides it), so
 only the files above are built. A directory that already holds ddclaim's full tables, as ddclaim's own build makes them, works
