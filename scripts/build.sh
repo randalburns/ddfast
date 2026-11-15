@@ -1,0 +1,86 @@
+#!/bin/sh
+# Builds ddfast. Run from anywhere; everything goes to bin/ (or $OUT):
+#   bin/libddfast.a     the library: ddfast and ddclaim (link it with -pthread)
+#   bin/ddfast          the command-line tool (tools/ddfast_cli.cpp)
+#   bin/test_ddfast     the exactness tests against DDS (tests/)
+#   bin/make_ref         writes a test set with DDS's answers (tests/make_ref.cpp)
+#   bin/bench_solve      single-thread and parallel benchmark (bench/bench_solve.cpp)
+#   bin/bench_tables     full-table benchmark against DDS CalcDDtable (bench/bench_tables.cpp)
+#   bin/libdds.a         DDS (extern/dds), for the tests and benchmarks only
+#
+# Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native), Linux, and the submodules
+# (git clone --recursive, or git submodule update --init). Uses clang++ if present, else g++;
+# set CXX to choose. Environment:
+#   XFLAGS="..."  more flags for ddfast's own sources, e.g. -DSTATS (prints search counters,
+#                 counts nodes), -DVERIFY_ORDER -DVERIFY_BOUNDS (checks the bounds and move
+#                 ordering against the DDS port on every call; aborts on any difference),
+#                 -DSELFTEST=10 (re-solves sample nodes to check the relevant-card sets).
+#                 Use a separate OUT for such builds.
+#   OUT=dir       output directory (default bin)
+#   LIBONLY=1     build only the library and the tool (no DDS, tests or benchmarks)
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+OUT=${OUT:-bin}
+mkdir -p "$OUT/obj" "$OUT/dds"
+if [ ! -f extern/ddclaim/src/ddclaim.cpp ] || [ ! -d extern/dds/library/src ]; then
+  echo "build.sh: submodules missing; run: git submodule update --init" >&2
+  exit 1
+fi
+if [ -z "${CXX:-}" ]; then
+  if command -v clang++ >/dev/null 2>&1; then
+    CXX="clang++"
+    # Some machines' clang picks a GCC without C++ headers unless told otherwise.
+    for d in /usr/lib/gcc/x86_64-linux-gnu/14 /usr/lib/gcc/x86_64-linux-gnu/13; do
+      if [ -d "$d" ] && [ -d "/usr/include/c++/$(basename "$d")" ]; then
+        CXX="clang++ --gcc-install-dir=$d"
+        break
+      fi
+    done
+  else
+    CXX="g++"
+  fi
+fi
+XFLAGS=${XFLAGS:-}
+JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+BASE="-std=c++20 -O3 -DNDEBUG -march=native"
+INC="-Iinclude -Iextern/ddclaim/include"
+DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
+echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
+
+# The library: ddclaim (unchanged, as its own build compiles it) and ddfast.
+rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/api.o"
+# shellcheck disable=SC2086
+{
+  $CXX $BASE -Iextern/ddclaim/include -c extern/ddclaim/src/ddclaim.cpp -o "$OUT/obj/ddclaim.o" &
+  $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
+  $CXX $BASE $XFLAGS $INC -c src/api.cpp -o "$OUT/obj/api.o" &
+  wait
+}
+[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/api.o" ]
+rm -f "$OUT/libddfast.a"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/api.o" "$OUT/obj/ddclaim.o"
+# shellcheck disable=SC2086
+$CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
+[ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }
+
+# DDS, for reference answers. Built once (an object is rebuilt when its source is newer).
+find extern/dds/library/src -name '*.cpp' > "$OUT/dds/sources"
+# shellcheck disable=SC2016
+xargs -P "$JOBS" -I{} sh -c 'o="$1/$(echo "$2" | tr / _).o"; if [ ! -f "$o" ] || [ "$2" -nt "$o" ]; then $0 $3 -c "$2" -o "$o" || exit 255; fi' \
+  "$CXX" "$OUT/dds" {} "$BASE -w $DDSINC" < "$OUT/dds/sources"
+rm -f "$OUT/libdds.a"
+ar rcs "$OUT/libdds.a" "$OUT"/dds/*.o
+
+# Tests and benchmarks.
+for b in test_ddfast make_ref bench_solve bench_tables; do rm -f "$OUT/$b"; done
+# shellcheck disable=SC2086
+{
+  $CXX $BASE $INC $DDSINC -Itests tests/test_ddfast.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/test_ddfast" &
+  $CXX $BASE $INC $DDSINC -Itests tests/make_ref.cpp "$OUT/libdds.a" -pthread -o "$OUT/make_ref" &
+  $CXX $BASE $INC $DDSINC -Itests bench/bench_solve.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_solve" &
+  $CXX $BASE $INC $DDSINC -Itests bench/bench_tables.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_tables" &
+  wait
+}
+for b in test_ddfast make_ref bench_solve bench_tables; do [ -x "$OUT/$b" ] || { echo "build.sh: $b failed" >&2; exit 1; }; done
+echo "build.sh: done"

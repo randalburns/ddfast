@@ -1,0 +1,6 @@
+# Build output (scripts/build.sh; OUT=... builds go to other bin* directories)
+/bin*/
+# ddclaim's tables, when built under the repository (default build/ddclaim)
+/build/
+*.o
+*.a

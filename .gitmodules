@@ -1,0 +1,6 @@
+[submodule "extern/dds"]
+	path = extern/dds
+	url = https://github.com/dds-bridge/dds.git
+[submodule "extern/ddclaim"]
+	path = extern/ddclaim
+	url = https://github.com/randalburns/ddclaim.git
