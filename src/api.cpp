@@ -202,6 +202,21 @@ void solve(const Problem* problems, size_t n, uint8_t* tricks) {
     if (problems[i].declarer & 1) tricks[i] = uint8_t(13 - tricks[i]);
 }
 
+int solve_position(const Position& p, bool keep_table) {
+  ddclaim::Position q;
+  int n = -1;
+  for (int s = 0; s < 4; s++) {
+    int len = 0;
+    for (int h = 0; h < 4; h++) q.hand[s][h] = p.hand[s][h], len += __builtin_popcount(p.hand[s][h]);
+    if (n < 0) n = len;
+    if (len != n) return -1;
+  }
+  if (n < 1 || n > 13 || p.trump > 4 || p.leader > 3) return -1;
+  q.trump = p.trump;
+  q.leader = p.leader;
+  return detail::solve_position(q, keep_table);
+}
+
 void solve_table(const Deal& deal, Table& table) { detail::solve_table(deal.hand, table.tricks); }
 
 bool pin_thread(int cpu) { return ddclaim::pin_thread(cpu); }

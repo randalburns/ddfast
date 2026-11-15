@@ -13,6 +13,9 @@ void init(const char* dir);
 // tricks[i] = North-South's tricks in positions[i] (ddclaim::Position: hands, trump, leader;
 // 13 cards a hand here). On the calling thread.
 void solve(const ddclaim::Position* positions, size_t n, uint8_t* tricks);
+// North-South's tricks in one position at the start of a trick (any equal hand size 1..13);
+// keep: keep the search table of the previous call (same strain).
+int solve_position(const ddclaim::Position& p, bool keep);
 // tricks[strain][declarer]: declarer's side's tricks (DDS's res_table layout).
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]);
 

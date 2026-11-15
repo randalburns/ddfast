@@ -3647,6 +3647,12 @@ void solve(const Position* positions, size_t count, uint8_t* tricks) {
   run_batch(positions, count, tricks, NCTX);
 }
 
+int solve_position(const Position& p, bool keep) {
+  ensure_state();
+  if (!S->tt.dir) S->tt.alloc();  // as in solve_table
+  return ::solve_position(p, 0, keep);
+}
+
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) {
   Position p;
   memcpy(p.hand, hand, sizeof p.hand);
@@ -3656,7 +3662,7 @@ void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) {
     p.trump = uint8_t(strain);
     for (int d = 0; d < 4; d++) {
       p.leader = uint8_t((d + 1) & 3);
-      const int ns = solve_position(p, 0, d > 0);
+      const int ns = ::solve_position(p, 0, d > 0);
       tricks[strain][d] = uint8_t((d & 1) ? popc(H[0]) - ns : ns);
     }
   }
