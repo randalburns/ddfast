@@ -210,13 +210,18 @@ ddfast::solve_table(d, t);                         // t.tricks[strain][declarer]
 std::vector<int> cpus = ddfast::available_cpus();  // fastest cores first
 ddfast::solve_parallel(problems, n, out, cpus.data(), int(cpus.size()));
 ddfast::solve_tables_parallel(deals, n, tables, cpus.data(), int(cpus.size()));
+
+int fast[4] = {0, 1, 2, 3};                        // one deal on several cores (lower latency)
+ddfast::pin_thread(fast[0]);                       // the calling thread works as well, on fast[0]
+int dtricks = ddfast::solve_deal_parallel(p, fast, 4);
 ```
 
 Link with `bin/libddfast.a -pthread`, and compile with `-march=native` (or another target with
 AVX-512 and BMI2) and `-Iinclude`.
 
 Thread safety: after `init()`, `solve`, `solve_table` and `solve_tables` may be called from any
-number of threads at once. The two parallel calls share one pool and must not overlap.
+number of threads at once. The two parallel calls share one pool and must not overlap;
+`solve_deal_parallel` has its own pool and must not overlap them either.
 
 ## Tests and benchmarks
 
@@ -228,6 +233,7 @@ bin/test_ddfast tables 200 1     # 200 full tables against DDS CalcDDtable
 bin/make_ref my.set 1000 7        # a test set with DDS's answers; then: bin/test_ddfast set my.set
 taskset -c 0 bin/bench_solve set tests/data/public.set     # cycles per deal on one core
 bin/bench_solve parallel tests/data/public.set auto        # on the thread pool
+bin/bench_solve deal tests/data/public.set 3 1t 0-3        # latency of one deal: solve() vs 4 cores
 bin/bench_tables 200 4242                                  # tables against DDS CalcDDtable
 ```
 

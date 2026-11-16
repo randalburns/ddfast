@@ -972,3 +972,97 @@ harness_fs* jobs on CPUs 8-10): comp/merged2 lean.cpp built from a scratch copy 
   (148.7k per deal).
 - comp/merged3: 17.40M / 17.76M cycles (-6.8% / -5.3%), 40.05M instructions (-6.8%),
   84.84M nodes (141.4k per deal, -4.9%).
+
+## Round 13: one deal on several cores (branch parallel-deal)
+
+Goal: lower latency for a single deal on the 4 fast cores (0-3) and their SMT siblings
+(12-15), exact, without slowing the batch path. New call `solve_deal_parallel(problem, cpus,
+ncpu, &lead_nodes)`; the calling thread works as participant 0 (pin it to cpus[0]), helpers are
+pinned to cpus[1..). Measured with `bench_solve deal FILE reps CFG...` (configurations alternate
+pass by pass, best of reps per deal; the costliest 10% / 1% by single-thread time; "nodes" are
+lead nodes summed over threads against solve(), counted by the lead-memory counter that plain
+builds keep anyway; Mcycles = the calling thread's cycles per deal, i.e. latency in cycles).
+
+Design (final):
+- `src/par_deal.cpp` includes `solver.cpp` with `DDF_PAR`: a second copy of the search with its
+  own thread-local state and three hooks, all under `#ifdef DDF_PAR`: an abort flag checked at
+  every lead node and before every table store; a mask on hand 2's replies at trick 1; and a
+  split point after hand 2's first reply at trick 1. The default object `solver.o` compiles to
+  the same machine code as before (objdump diff: only the new `lead_nodes()` accessor);
+  STATS node count 84,841,515, twice.
+- The calling thread runs solve_one's question sequence (same guess, same moves of t). Each
+  question: the root leads in DDS's order (hint = last cutting root lead) become work items;
+  an item searches its lead against hand 2's first reply only; if that fails to refute, the
+  other replies become one item each, queued ahead of the leads not yet started (young
+  brothers wait, at trick 1). A lead cuts when all its items cut (question decided: abort
+  everything); one refuted item refutes the lead (abort its other items); the question is
+  false when every lead is refuted. Items come from a small locked list, lowest priority first.
+- Aborts: the flag only ever goes from clear to set within a question, and a node stores only
+  if it is still clear when the node finishes, so every stored entry comes from a complete
+  search. Aborted items' finished subtrees stay in the tables and serve later items.
+- Tables: each thread keeps its own per-deal table across the questions of the deal; results
+  from 6 cards up also go into a shared table of 16 stripes (independent TT instances, a
+  key's stripe by a second hash). Writers lock the stripe and make its sequence number odd;
+  readers take no lock and treat a changed or odd sequence as a miss (chains always point to
+  lower block numbers, so a torn read terminates; its answer is dropped).
+- Helpers spin 3 ms for the next question, then sleep on a condition variable.
+
+Measurements, public set, idle machine (before another agent started on CPUs 8-11), best of
+2-3 per deal, single thread 3.18-3.19 ms (all), 14.2-14.3 ms (top 10%), 28.9-29.0 ms (top 1%):
+
+| design | threads | all | top 10% | top 1% | nodes |
+|---|---|---|---|---|---|
+| first lead split by hand 2, private tables | 2 / 4 / 8 | x1.09 / x1.27 / x1.14 | x1.13 / x1.32 / x1.20 | x1.17 / x1.31 / x1.18 | 1.67 / 2.36 / 3.00 |
+| root leads only, private tables | 4 | x1.30 | x1.34 | x1.31 | 2.36 |
+| + one shared table, single lock, from 8 cards | 4 / 8 | x1.33 / x1.26 | x1.42 / x1.35 | x1.33 / x1.24 | 1.94 / 2.36 |
+| same from 6 cards (lock contention) | 4 / 8 | x0.96 / x0.66 | | | 1.64 / 1.78 |
+| root only, 16 stripes, from 8 / 6 / 4 cards | 4 | x1.49 / x1.48 / x1.37 | x1.52 / x1.54 / x1.45 | x1.44 / x1.45 / x1.38 | 1.84 / 1.60 / 1.53 |
+| final (YBW at trick 1, 16 stripes, from 6) | 4 | x1.45-1.57 | x1.51-1.66 | x1.40-1.69 | 1.60 |
+| final | 8 | x1.44 | x1.49 | x1.35 | 1.90 |
+
+In cycles of the calling thread (clock-independent) the final design is x1.65 at 4 threads;
+the 4-core load costs about 7% clock (caller 5.06 -> 4.71 GHz), the SMT siblings more (4.2-4.6).
+Final design measured again later with the machine loaded by other work (load average 10-24,
+clock 3.0-3.7 GHz; single thread 4.54 / 20.2 / 41.3 ms):
+
+| threads | all | top 10% | top 1% | nodes | Mcycles/deal (x) |
+|---|---|---|---|---|---|
+| 1 (solve) | 4.536 ms | 20.21 ms | 41.26 ms | 1.000 | 16.98 |
+| 2 (0-1) | 4.381 ms x1.04 | 19.16 ms x1.05 | 40.21 ms x1.03 | 1.353 | 14.79 (x1.15) |
+| 4 (0-3) | 3.600 ms x1.26 | 15.53 ms x1.30 | 33.61 ms x1.23 | 1.612 | 10.86 (x1.56) |
+| 8 (0-3,12-15) | 3.673 ms x1.23 | 15.83 ms x1.28 | 36.00 ms x1.15 | 1.899 | 11.01 (x1.54) |
+
+Where the time goes (final, 4 threads): threads are in work items 75-84% of the question time
+(the rest waits for the last item); 15-17% of thread time is in items later aborted. Node
+overhead 1.6x. Per lead node, private tables alone cost 1.04x the single-thread time per node;
+with the shared table from 6 cards 1.33x (locking and cache-line transfers between cores), so
+the shared table trades fewer nodes for dearer ones: from 8 cards and from 6 cards come out
+equal in time.
+
+Tried, no gain: splitting every root lead by hand 2's replies up front (x1.26, nodes 2.30: the
+replies transpose into each other, and searched at once none finds the others' entries);
+YBW against root-only splitting (equal within noise; YBW kept for the costliest deals, where a
+cutting first lead otherwise runs on one thread); seqlock readers instead of locked readers
+(no measurable change; kept, as readers no longer write shared lines); storing into the shared
+table only results whose subtree had 8-32+ lead nodes (`PAR_SHCOST`; more nodes, no faster).
+Experiment switches (environment, par build only): `PAR_SPLIT` (0 root leads, 1 first lead by
+replies, 2 every lead by replies, 3 YBW, default), `PAR_SHMIN` (shared table from n cards; 99
+off), `PAR_SHCOST`, `PAR_STATS` (prints item and waste counters at exit).
+
+Batch path: unchanged. bench_solve set on CPU 0, branch vs main built from main's sources,
+alternating: 39,390,560 instructions per deal in both; cycles 17.13/17.06/17.31M vs
+17.14/17.07/16.97M. bench_solve parallel 0-3: 658.7/648.2 vs 657.3/654.7 deals/s.
+
+Exactness: test_ddfast now also checks solve_deal_parallel on every set. All exact: quick
+(public set, 100 random, 10 tables); the public set 10 times (5 x 4 threads, 5 x 8 threads);
+random 3000 seed 20261115 (4 threads) and 2000 seed 777001 (8 threads) against DDS; the 100,000
+reference deals (ddfast-refs chunk0-7, 4 threads).
+
+What more could buy: (1) the 1.6x node overhead is mostly lost transpositions between items
+running at once; a cheaper shared table (lock-free entry publication, so it can go down to 4
+cards) or keeping each root lead on the thread that searched it in the previous question
+(its private table holds the small entries) should cut it. (2) 16-25% idle time behind the
+last item: split deeper (hand 3/4 replies at trick 1, or trick 2's leads) when threads are
+idle, or abort and re-split a long item (its finished subtrees stay in the tables). (3) SMT
+siblings do not pay with this design; a table variant (solve_table, 20 problems) would
+parallelise far better by problems than inside one search.
