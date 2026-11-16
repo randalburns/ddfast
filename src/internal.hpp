@@ -19,6 +19,11 @@ int solve_position(const ddclaim::Position& p, bool keep);
 // tricks[strain][declarer]: declarer's side's tricks (DDS's res_table layout).
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]);
 
+// One deal (13 cards a hand) searched on the calling thread and helpers on cpus[1..ncpu)
+// (par_deal.cpp); North-South's tricks. lead_nodes: lead nodes searched by all threads.
+int solve_deal_parallel(const ddclaim::Position& p, const int* cpus, int ncpu, unsigned long long* lead_nodes);
+void stop_deal_pool();
+unsigned long long lead_nodes();         // lead nodes searched on the calling thread (all builds)
 unsigned long long nodes();              // nodes searched, lead and follow (STATS builds; otherwise 0)
 extern const uint8_t* g_first_target;    // development: per position, the first target (0: the usual guess)
 

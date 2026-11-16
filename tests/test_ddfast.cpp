@@ -7,8 +7,10 @@
 //   tables N SEED      N random deals: solve_table, solve_tables and solve_tables_parallel
 //                      against DDS CalcDDtable
 // Problems are checked with solve() on this thread, then with solve_parallel() on LIST (default:
-// available_cpus()). Exit status 0 if everything is exact. The tables are loaded from
+// available_cpus()), then one at a time with solve_deal_parallel() on the first N of LIST
+// (--deal-threads N, default 8). Exit status 0 if everything is exact. The tables are loaded from
 // $DDCLAIM_DIR (default build/ddclaim), built there first if missing.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -22,6 +24,7 @@ using namespace testing;
 namespace {
 
 std::vector<int> g_cpus;
+size_t g_deal_threads = 8;  // solve_deal_parallel uses the first this many of g_cpus (--deal-threads)
 
 int check_problems(const char* what, const std::vector<ddfast::Problem>& ps, const std::vector<uint8_t>& ref) {
   const size_t n = ps.size();
@@ -48,7 +51,22 @@ int check_problems(const char* what, const std::vector<ddfast::Problem>& ps, con
   for (size_t i = 0; i < n; i++) badp += par[i] != ref[i];
   printf("%-28s %6zu problems  solve_parallel: %s  (%zu threads, %.1f deals/s)\n", what, n, badp ? "WRONG" : "exact",
          g_cpus.size(), n / t);
-  return bad + badp;
+  // One deal at a time on all the CPUs (this thread pinned to the first).
+  std::vector<int> dc(g_cpus.begin(), g_cpus.begin() + std::min<size_t>(g_cpus.size(), g_deal_threads));
+  if (dc[0] >= 0) ddfast::pin_thread(dc[0]);
+  int badd = 0;
+  t = now();
+  for (size_t i = 0; i < n; i++) {
+    const int r = ddfast::solve_deal_parallel(ps[i], dc.data(), int(dc.size()));
+    if (r != ref[i]) {
+      if (badd < 5) fprintf(stderr, "  %s: problem %zu: solve_deal_parallel %d, DDS %d\n", what, i, r, ref[i]);
+      badd++;
+    }
+  }
+  t = now() - t;
+  printf("%-28s %6zu problems  solve_deal_parallel: %s  (%zu threads, %.1f deals/s)\n", what, n, badd ? "WRONG" : "exact",
+         dc.size(), n / t);
+  return bad + badp + badd;
 }
 
 int test_set(const char* path) {
@@ -107,6 +125,7 @@ int main(int argc, char** argv) {
   std::string cpus = "auto";
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--cpus") && i + 1 < argc) cpus = argv[++i];
+    else if (!strcmp(argv[i], "--deal-threads") && i + 1 < argc) g_deal_threads = size_t(atol(argv[++i]));
     else args.push_back(argv[i]);
   }
   const std::string cmd = args.empty() ? "quick" : args[0];

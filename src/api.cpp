@@ -296,6 +296,16 @@ std::vector<int> available_cpus(bool smt) {
 #endif
 }
 
-void stop_pool() { pool().stop(); }
+void stop_pool() {
+  pool().stop();
+  detail::stop_deal_pool();
+}
+
+int solve_deal_parallel(const Problem& p, const int* cpus, int ncpu, unsigned long long* lead_nodes) {
+  const int ns = detail::solve_deal_parallel(to_position(p), cpus, ncpu, lead_nodes);
+  return (p.declarer & 1) ? 13 - ns : ns;
+}
+
+unsigned long long stat_lead_nodes() { return detail::lead_nodes(); }
 
 }  // namespace ddfast

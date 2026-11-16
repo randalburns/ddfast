@@ -99,7 +99,20 @@ void solve_parallel(const Problem* problems, size_t n, uint8_t* tricks, const in
 void solve_tables_parallel(const Deal* deals, size_t n, Table* tables, const int* cpus, int ncpu,
                            std::vector<WorkerStats>* stats = nullptr);
 
-// Stops the pool's threads (optional; also done at exit).
+// One problem searched on several cores at once, for lower latency on a single deal: the
+// calling thread and one helper thread on each of cpus[1..ncpu) (pinned) share the search of
+// each question by root leads (and by second hand's replies to the first lead). Pin the calling
+// thread to cpus[0] (pin_thread) for the best results. Returns declarer's tricks, exact like
+// solve(). Helpers spin for a few milliseconds after each question, then sleep. Not reentrant,
+// and not to be overlapped with solve_parallel() on the same CPUs. lead_nodes, if given: the
+// lead nodes searched by all threads (compare stat_lead_nodes() for solve()).
+int solve_deal_parallel(const Problem& p, const int* cpus, int ncpu, unsigned long long* lead_nodes = nullptr);
+
+// Lead nodes (nodes at the start of a trick) searched so far by solve(), solve_position() and
+// solve_table() on the calling thread, in any build.
+unsigned long long stat_lead_nodes();
+
+// Stops the pool's threads, both pools (optional; also done at exit).
 void stop_pool();
 
 // Pins the calling thread to one CPU; false if that fails.

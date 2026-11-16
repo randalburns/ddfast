@@ -4,6 +4,11 @@
 //
 // Everything here is internal (an anonymous namespace); the entry points are in namespace
 // ddfast::detail at the end, used by api.cpp.
+// DDF_PAR: this file compiled a second time inside src/par_deal.cpp, for the parallel search
+// of one deal (its own thread-local state, abort checks, no STATS counters, no entry points).
+#ifdef DDF_PAR
+#undef STATS
+#endif
 #include <unordered_map>
 #include "ddclaim/port.hpp"
 
@@ -32,7 +37,9 @@
 #include "dds_port.hpp"
 #include "internal.hpp"
 
+#ifndef DDF_PAR
 namespace ddfast::detail { const uint8_t* g_first_target; }
+#endif
 
 namespace {
 
@@ -186,8 +193,19 @@ struct Hot {
   int snapdepth = 0;
   u64 skiphint = 0;     // and this is the hint it would have found
   u64 mnodes = 0;
+#ifdef DDF_PAR
+  const std::atomic<uint8_t>* stop = nullptr;  // the running work item's abort flag (never null while searching)
+  u64 mask2 = ~0ull;                            // hand 2's replies allowed at trick 1 (the root's follow node)
+  bool ybw = false;                             // stop at trick 1 after hand 2's first reply fails ...
+  u64 rest = 0;                                 // ... leaving these replies
+#endif
 };
 thread_local Hot g_hot;
+#ifdef DDF_PAR
+#define PAR_STOP() (g_hot.stop->load(std::memory_order_relaxed) != 0)
+#else
+#define PAR_STOP() false
+#endif
 #define H (g_hot.H)
 #define LENS (g_hot.LENS)
 #define S (g_hot.S)
@@ -1863,10 +1881,18 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
 }
 #endif
 
+#ifdef DDF_PAR
+// The parallel search: a thread's own table first, then (from PAR_SHMIN cards) the table
+// shared by all threads of the deal, under one lock (par_deal.cpp).
+PROF_NI int tt_lookup_in(TT& tt, int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
+  {
+    const bool wide = n >= 8;
+#else
 PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
   {
     const bool wide = n >= 8;
     TT& tt = S->tt;
+#endif
     const DirSlot* d0 = tt.find(key54);
     STAT(g_tnoslot[n] += !d0 && !wide);
     if (const DirSlot* d = d0) {
@@ -1886,7 +1912,9 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
           STAT(g_blk[n]++);
           const u64* e = tt.pool + size_t(blk) * 8;
           const unsigned kd = tt_match_narrow(e, own, dec);
-          STAT(for (int i_ = 0; i_ < 8; i_++) sb_any |= unsigned((e[8 + i_] & dec) && e[i_] != ~0ull) << i_);
+#ifdef STATS
+          for (int i_ = 0; i_ < 8; i_++) sb_any |= unsigned((e[8 + i_] & dec) && e[i_] != ~0ull) << i_;
+#endif
           STAT(sb_n++);
           if (kd) {
             STAT(g_blkhit[n] += sb_n);
@@ -1953,6 +1981,60 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
 
   return -1;
 }
+#ifdef DDF_PAR
+#ifndef PAR_SHMIN
+#define PAR_SHMIN 6
+#endif
+struct alignas(64) SpinLock {
+  std::atomic<bool> f{false};
+  void lock() {
+    for (;;) {
+      if (!f.exchange(true, std::memory_order_acquire)) return;
+      while (f.load(std::memory_order_relaxed)) _mm_pause();
+    }
+  }
+  void unlock() { f.store(false, std::memory_order_release); }
+};
+#ifndef PAR_STRIPES
+#define PAR_STRIPES 16
+#endif
+// The deal's shared table (null: none): PAR_STRIPES independent tables, each under its own
+// lock, a key's stripe chosen by a hash independent of the directory's.
+// Writers take the stripe's lock and make its sequence number odd while they write; readers
+// take no lock: they read the sequence number before and after the lookup and count it a miss
+// if a writer was active or intervened (the lookup itself only reads; chains always lead to
+// lower block numbers, so a torn read ends, and its answer is thrown away).
+struct alignas(64) Stripe {
+  SpinLock lock;
+  alignas(64) std::atomic<uint32_t> seq{0};
+};
+TT* g_shared = nullptr;
+Stripe g_stripes[PAR_STRIPES];
+#ifndef PAR_SHCOST
+#define PAR_SHCOST 1
+#endif
+const u64 g_shcost = getenv("PAR_SHCOST") ? atoi(getenv("PAR_SHCOST")) : PAR_SHCOST;  // experiments
+inline unsigned stripe_of(u64 key54) { return unsigned((key54 * 0xD6E8FEB86659FD93ull) >> 32) % PAR_STRIPES; }
+const int g_shmin = getenv("PAR_SHMIN") ? atoi(getenv("PAR_SHMIN")) : PAR_SHMIN;  // experiments
+int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
+  int r = tt_lookup_in(S->tt, n, target, all, ewq, swq, key54, hint, R);
+  if (r < 0 && n >= g_shmin && g_shared) {
+    const unsigned k = stripe_of(key54);
+    Stripe& st = g_stripes[k];
+    const uint32_t s0 = st.seq.load(std::memory_order_acquire);
+    if (!(s0 & 1)) {
+      u64 h2 = hint, R2 = 0;
+      const int r2 = tt_lookup_in(g_shared[k], n, target, all, ewq, swq, key54, h2, R2);
+      std::atomic_thread_fence(std::memory_order_acquire);
+      if (st.seq.load(std::memory_order_relaxed) == s0) {
+        hint = h2;
+        if (r2 >= 0) r = r2, R = R2;
+      }
+    }
+  }
+  return r;
+}
+#endif
 
 #if defined(ETC) || defined(ETCRE)
 // Enhanced transposition probe of one trick: the lead `best` (already removed from its hand)
@@ -2185,6 +2267,11 @@ bool lead(int n, int L, int target, u64& R) {
   constexpr u64 TR = Cfg<NT>::TR;
   STAT(g_nodes++);
   MEMTICK();
+  // Parallel search: an aborted work item unwinds at once; its results are never stored.
+  if (PAR_STOP()) [[unlikely]] { R = 0; return false; }
+#ifdef DDF_PAR
+  const u64 par_m0 = g_mnodes;  // shared-table stores only for subtrees of PAR_SHCOST lead nodes or more
+#endif
   STAT(g_leads++);
   STAT(g_n[n][0]++);
   if (n == 1) {
@@ -2234,9 +2321,13 @@ bool lead(int n, int L, int target, u64& R) {
       return r != 0;
     }
   }
+#ifdef DDF_PAR
+  auto tt_store_in = [&](TT& tt, u64 Racc, bool res, u64 bestc) {
+#else
   auto tt_store = [&](u64 Racc, bool res, u64 bestc) {
     if (n < TT_MIN) return;
     TT& tt = S->tt;
+#endif
     const uint32_t lines = wide ? 3 : 2;
     if (tt.used + lines > (1u << POOL_BITS)) tt.reset();
     DirSlot* d = tt.obtain(key54);
@@ -2275,6 +2366,24 @@ bool lead(int n, int L, int target, u64& R) {
     if (bestc) key = (key & ~(63ull << 54)) | u64(popc(all & (bestc - 1))) << 54;
     d->key = key;
   };
+#ifdef DDF_PAR
+  auto tt_store = [&](u64 Racc, bool res, u64 bestc) {
+    if (n < TT_MIN) return;
+    if (PAR_STOP()) [[unlikely]] return;
+    tt_store_in(S->tt, Racc, res, bestc);
+    if (n >= g_shmin && g_shared && g_mnodes - par_m0 >= g_shcost) {
+      const unsigned k = stripe_of(key54);
+      Stripe& st = g_stripes[k];
+      st.lock.lock();
+      const uint32_t s0 = st.seq.load(std::memory_order_relaxed);
+      st.seq.store(s0 + 1, std::memory_order_relaxed);
+      std::atomic_thread_fence(std::memory_order_release);
+      tt_store_in(g_shared[k], Racc, res, bestc);
+      st.seq.store(s0 + 2, std::memory_order_release);
+      st.lock.unlock();
+    }
+  };
+#endif
   bool filled = false;
   if (dq) {
     bool value;
@@ -2988,6 +3097,9 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
   const u64 mine = H[s];
   const u64 in_suit = mine & lane;
   u64 cand = heads(in_suit ? in_suit : mine, all);
+#ifdef DDF_PAR
+  if constexpr (K == 1) if (n == 13) cand &= g_hot.mask2;  // a work item: some of hand 2's replies
+#endif
   u64 Racc = 0;
   u64 tried = 0;
   bool first = true;
@@ -3198,6 +3310,10 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
     Racc |= Rc;
     if (SW(8) && !(c & Rc)) cand &= ~lane_of(c) | Rc;
     first = false;
+#ifdef DDF_PAR
+    // A work item that splits after hand 2's first reply: the rest go to other threads.
+    if constexpr (K == 1) if (n == 13 && g_hot.ybw && cand) { g_hot.rest = cand; R = 0; return !cut; }
+#endif
   }
 #if RUNOPT
   Racc = add_runs(Racc, tried, mine, all);
@@ -3478,7 +3594,12 @@ int solve_one(int n, int L, int first) {
 // Coroutines: several positions are searched in turn on one thread. A search that needs a
 // three-card table entry prefetches it and hands over to the next search, so the memory
 // access is over by the time it resumes.
+#ifdef DDF_PAR
+#define ddfast_ctx_switch ddfast_par_ctx_switch
+DDPORT_DEFINE_CTX_SWITCH(ddfast_par_ctx_switch)
+#else
 DDPORT_DEFINE_CTX_SWITCH(ddfast_ctx_switch)
+#endif
 
 constexpr int MAX_CTX = 64;
 constexpr size_t STACK_BYTES = 256 << 10;
@@ -3619,6 +3740,7 @@ void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks
 
 }  // namespace
 
+#ifndef DDF_PAR
 namespace ddfast::detail {
 
 
@@ -3676,4 +3798,7 @@ unsigned long long nodes() {
 #endif
 }
 
+unsigned long long lead_nodes() { return g_mnodes; }
+
 }  // namespace ddfast::detail
+#endif  // DDF_PAR

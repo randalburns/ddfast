@@ -59,17 +59,18 @@ DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
 # The library: ddclaim (unchanged, as its own build compiles it) and ddfast.
-rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/api.o"
+rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o"
 # shellcheck disable=SC2086
 {
   $CXX $BASE -Iextern/ddclaim/include -c extern/ddclaim/src/ddclaim.cpp -o "$OUT/obj/ddclaim.o" &
   $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
+  $CXX $BASE $XFLAGS $INC -Isrc -c src/par_deal.cpp -o "$OUT/obj/par_deal.o" &
   $CXX $BASE $XFLAGS $INC -c src/api.cpp -o "$OUT/obj/api.o" &
   wait
 }
-[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/api.o" ]
+[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ]
 rm -f "$OUT/libddfast.a"
-ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/api.o" "$OUT/obj/ddclaim.o"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/ddclaim.o"
 # shellcheck disable=SC2086
 $CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
 [ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }
