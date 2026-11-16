@@ -1886,7 +1886,9 @@ PROF_NI int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u
           STAT(g_blk[n]++);
           const u64* e = tt.pool + size_t(blk) * 8;
           const unsigned kd = tt_match_narrow(e, own, dec);
-          STAT(for (int i_ = 0; i_ < 8; i_++) sb_any |= unsigned((e[8 + i_] & dec) && e[i_] != ~0ull) << i_);
+#ifdef STATS
+          for (int i_ = 0; i_ < 8; i_++) sb_any |= unsigned((e[8 + i_] & dec) && e[i_] != ~0ull) << i_;
+#endif
           STAT(sb_n++);
           if (kd) {
             STAT(g_blkhit[n] += sb_n);
@@ -2724,6 +2726,18 @@ inline u64 min_rank(u64 cand) {
 #ifndef K2L
 #define K2L 0
 #endif
+#ifndef K2W
+#define K2W 0  // third hand, can beat the fourth hand: 1 lowest winner, 2 second-lowest card, when second hand holds K2WN+ cards
+#endif
+#ifndef K2WN
+#define K2WN 4
+#endif
+#ifndef COVPL
+#define COVPL 3  // second hand, partner wins: lowest card above third hand's top when partner (playing last) holds COVPL+ cards and a card above second hand's top
+#endif
+#ifndef COVPLX
+#define COVPLX 0  // 1: without the partner-above-my-top test; 2: also when third hand is void; 4: partner holds 2+ cards above the bar; 8: exactly one
+#endif
 #ifndef COVPB
 #define COVPB 0
 #endif
@@ -2754,6 +2768,7 @@ inline u64 pick_follow(u64 cand, bool first, int s, u64 lane, u64 best, int bw) 
     if (!win) return lowest(cand);
     if (!nl) return (THR && !NT && !(lane & Cfg<NT>::TR) && (H[(s + 1) & 3] & Cfg<NT>::TR)) ? lowest(cand) : lowest(win);
     u64 w2 = win & above(highest(nl));
+    if (K2W && w2 && popc(H[(s + 3) & 3] & lane) >= K2WN) return K2W == 1 ? lowest(win) : lowest((cand & (cand - 1)) ? cand & (cand - 1) : cand);
     return w2 ? lowest(w2) : (K2L && !(H[(s + 3) & 3] & lane & above(best) & ~above(lowest(win))) ? lowest(cand) : lowest(win));
   }
   if (!win) { STAT(g_why = 0); return lowest(cand); }
@@ -2763,6 +2778,10 @@ inline u64 pick_follow(u64 cand, bool first, int s, u64 lane, u64 best, int bw) 
     const u64 pl = H[(s + 2) & 3] & lane;
     const u64 top3 = nl ? highest(nl) : 0;
     const u64 bar = top3 > best ? top3 : best;
+    if (COVPL && pl && highest(pl) > bar && popc(pl) >= COVPL && ((COVPLX & 1) || highest(pl) > highest(cand)) && (!(COVPLX & 4) || popc(pl & above(bar)) >= 2) && (!(COVPLX & 8) || popc(pl & above(bar)) == 1)) {
+      const u64 w3 = nl ? win & above(highest(nl)) : ((COVPLX & 2) ? win : 0);
+      if (w3) { STAT(g_why = 1); return lowest(w3); }
+    }
     if (pl ? highest(pl) > bar && (int(__builtin_ctzll(best) & 15) < COVRH || !(H[(s + 3) & 3] & lane & ~above(best) & (best >> 1))) && (COV2 != 3 || highest(pl) > highest(cand)) && (COV2 != 4 || nl) : (COV2 == 2 && !NT && nl && !(lane & Cfg<NT>::TR) && (H[(s + 2) & 3] & Cfg<NT>::TR))) { STAT(g_why = 1); return lowest(cand); }
   }
 #endif

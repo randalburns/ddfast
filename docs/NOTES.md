@@ -972,3 +972,51 @@ harness_fs* jobs on CPUs 8-10): comp/merged2 lean.cpp built from a scratch copy 
   (148.7k per deal).
 - comp/merged3: 17.40M / 17.76M cycles (-6.8% / -5.3%), 40.05M instructions (-6.8%),
   84.84M nodes (141.4k per deal, -4.9%).
+
+## Round 13 (follow-rules): second hand plays above third hand when its long partner has one winner
+
+Base main (71f41c6). STATS: public set 84,841,515 nodes; fresh deals (`bench_solve random 2000
+SEED`, STATS build) 288,468,161 (seed 1001), 287,588,571 (2002), 265,608,447 (3003). Also fixed
+the STATS build, which no longer compiled (a `for` inside `STAT(...)` in tt_lookup).
+
+Method (as round 11). FSNAP per-card proof sizes on the public set: second hand at 12 cards
+(33,407 nodes), third and fourth hand at 11 cards (about 104k nodes each; runs stopped early).
+Oracle (cheapest cutting card) against the current first card, cut nodes only:
+- second hand, COV2 "partner wins, play low" at 12 cards: 31.4M vs 22.2M; the other second-hand
+  cases 71.3M vs 57.7M.
+- third hand: 17.1M vs 14.0M (partial log); the biggest gap is "can beat the fourth hand's top"
+  (lowest such card, 6.6M vs 5.1M), then "partner wins, fourth hand can beat it" and "can beat
+  the lead but not the fourth hand".
+- fourth hand: 29.8M vs 27.1M where it can win; spread thin, no group worth a rule.
+A split-half search (every single feature and pair of features, gain required on both halves of
+the log) ranked the candidates; the gains it found are small (0.3-1.5% of a group) and the
+predicted ones did not always hold in the real search (K2W below).
+
+Kept (ordering only):
+- COVPL=3: in COV2's "partner wins" case, second hand plays its lowest card above the third
+  hand's top (instead of its lowest card) when its partner (playing last) holds 3+ cards in the
+  suit and a card above second hand's top. Nodes public 84.84M -> 82.92M (-2.27%); fresh 1001
+  288.47M -> 284.93M (-1.23%), 2002 287.59M -> 281.98M (-1.95%), 3003 265.61M -> 262.21M
+  (-1.28%); fresh total -1.49%. The gain is all in the case where the partner holds exactly one
+  card above the bar (COVPLX=8 gives the same counts: 82.89M / 284.92M).
+- Cycles (public set, CPU 11, 7 alternating runs old/new; CPUs 9-10 busy with checks, so
+  noisy): old 16.17M min / 16.68M median, new 15.98M / 16.56M (-1.2% / -0.7%).
+
+Measured, not kept (switches in the tree, default off; nodes public / fresh 1001 unless noted):
+- COVPL=1 84.99M / 289.10M; 2 83.14M / 285.08M; 4 83.21M / 285.86M.
+- COVPLX=1 (no partner-above-my-top test) 83.21M / 290.53M; =2 (also when third hand is void)
+  82.59M / 285.01M but 283.08M on 2002 (vs 281.98M); =4 (partner holds 2+ above the bar)
+  85.03M / 288.85M; COVPL=3 COVPLX=9 82.77M / 287.48M.
+- COVPL=2 COVPLX=8: 82.58M / 284.43M, 2002 283.60M, 3003 262.15M: fresh total -1.36% against
+  -1.49% for plain COVPL=3.
+- Third hand that can beat the fourth hand's top, when second hand still holds 4+ cards: lowest
+  winner (K2W=1) 86.19M / 293.28M (worse; predicted better by FSNAP); second-lowest card (K2W=2,
+  guarded for a single candidate) 86.48M public (worse).
+
+Exactness (final code, defaults): bin/test_ddfast all exact; STATS public 82,915,440 nodes all
+correct; plain `bench_solve random 3000` seeds 31337, 271828, 9001 all correct against DDS;
+every node count above also compared all answers with DDS; SELFTEST (-DSELFTEST=10
+-DSELFTEST_MAX=11, public set) 568,425 checks, all correct.
+
+Next: the third-hand gaps are real but no simple feature separated them; FSNAP at 12-13 cards
+(slow) or a two-level oracle (which accounts for table reuse) may be needed.
