@@ -18,29 +18,31 @@ O=${1:?usage: bench/loo.sh OUTDIR [SET]}
 SET=${2:-tests/data/public.set}
 mkdir -p "$O"
 
-# name|compile flags|environment|timing reps. The flags and environment turn the feature OFF.
-VARIANTS='scalar_tt|-DABL_SCALAR_TT||3
-scalar_pmatch|-DABL_SCALAR_PMATCH||3
-scalar_pick|-DABL_SCALAR_PICK||3
-scalar_order|-DOLD_ORDER||3
-no_avx512|-DABL_SCALAR_TT -DABL_SCALAR_PMATCH -DABL_SCALAR_PICK -DOLD_ORDER -DOLD_QT -DOLD_COMM -mno-avx512f||3
-soft_bits|-DABL_SOFT_BITS||3
-per_suit|-DOLD_QT -DOLD_COMM||3
-port_bounds|-DPORT_BOUNDS||3
-no_huge_tt||LEAN_NOHUGE_TT=1|3
-no_huge||LEAN_NOHUGE=1|3
-no_prefetch|-DABL_NOPREFETCH||3
-small_tt|-DPOOL_BITS=12||3
-no_t3||LEAN_NOT3=1|3
-no_p4||LEAN_NOP4=1|3
-no_tables||LEAN_NOT3=1 LEAN_NOP4=1|3
-no_tt|-DTT_MIN_N=14||1
-no_dds_order|-DDORD=99||3
-no_bounds|-DDMIN=99 -DDORD=4 -DDQ2=4||3
-no_follow_rules|-DCOV2=0 -DCOVB=0 -DCOVPL=0 -DDISC=0 -DVOIDR=0||3
-no_guess|-DABL_GUESS_MID||3
-no_skip|-DABL_SW=7||3
-no_runopt|-DRUNOPT=0||3'
+# name|compile flags|environment|timing reps. Each variant is something DDS does not do; the flags
+# and environment turn it OFF, back to the DDS way (or to a base table without the improvement).
+VARIANTS='tt_boundstore|-DABL_NO_BOUNDSTORE||3
+tt_p4store|-DABL_NO_P4STORE||3
+tt_pick|-DTTPICK=0||3
+tt_vector|-DABL_SCALAR_TT||3
+fitted_guess|-DABL_GUESS_DDS||3
+follow_rules|-DDFOL=2 -DCOV2=0 -DCOVB=0 -DCOVPL=0 -DDISC=0 -DVOIDR=0||3
+run_extension|-DRUNOPT=0||3
+lead_memory|-DNOMEM||3
+best_lead_weight|-DHX=0||3
+table_t3||LEAN_NOT3=1|3
+table_p4||LEAN_NOP4=1|3
+tables_both||LEAN_NOT3=1 LEAN_NOP4=1|3
+pext_pdep|-DABL_SOFT_BITS||3
+avx512_all|-DABL_SCALAR_TT -DABL_SCALAR_PMATCH -DABL_SCALAR_PICK -DOLD_ORDER -DOLD_QT -DOLD_COMM -mno-avx512f||3
+avx512_order|-DOLD_ORDER||3
+avx512_pick|-DABL_SCALAR_PICK||3
+avx512_pmatch|-DABL_SCALAR_PMATCH||3
+whole_word_qt|-DOLD_QT -DOLD_COMM||3
+native_bounds|-DPORT_BOUNDS||3
+native_order|-DPORT_ORDER||3
+huge_pages||LEAN_NOHUGE=1|3
+huge_pages_tt||LEAN_NOHUGE_TT=1|3
+prefetch|-DABL_NOPREFETCH||3'
 
 [ -n "${LOO_VARIANTS:-}" ] && VARIANTS=$LOO_VARIANTS  # another study (bench/dds_study.sh)
 

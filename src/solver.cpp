@@ -2418,7 +2418,9 @@ bool lead(int n, int L, int target, u64& R) {
 #endif
     if (dds_bounds<NT>(n, L, target, all, filled, R, value)) {
       STAT(g_qt++);STAT(g_n[n][1]++);
+#ifndef ABL_NO_BOUNDSTORE  // leave-one-out: bound cutoffs not stored (as in DDS)
       tt_store(R, value, 0);  // finding it again in the table is cheaper than the port
+#endif
       return value;
     }
   } else {
@@ -2440,7 +2442,9 @@ bool lead(int n, int L, int target, u64& R) {
     const int r = probe_pattern<NT>(H, LENS, n, L, all, target, pq, R, hit, [] { yield(); });
     if (r >= 0) {
       STAT(g_phit[n - 4]++);
+#ifndef ABL_NO_P4STORE  // leave-one-out: 4-card table hits not copied into the per-deal table
       tt_store(R, r, 0);  // a pattern in the per-deal table is cheaper to find again
+#endif
       return r;
     }
   }

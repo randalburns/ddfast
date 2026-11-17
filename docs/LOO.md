@@ -1,21 +1,33 @@
-# Leave-one-out study: what each part of ddfast's design is worth
+# Leave-one-out study: what ddfast adds to DDS's design
 
 November 2026. ddfast at `main` 5661a1d plus the study switches (`ABL_*`, all off by default).
 
 ## Summary
 
-On one core, ddfast solves the 600-deal public set **4.29× faster than DDS** (15.9M cycles per
-deal against 68.2M). Each feature below was turned off on its own while everything else stayed
-on, and the solver was timed again. Every variant still gave the right answer on all 600 deals.
+On one core, ddfast solves the 600-deal public set **4.25× faster than DDS** (15.9M cycles per
+deal against 67.5M). This study looks only at what ddfast does that DDS doesn't. Each addition
+was turned off on its own, going back to DDS's way of doing that job, or to a plain table
+without the improvement, and the solver was timed again. Every variant still gave the right
+answer on all 600 deals.
 
-- **The search design is most of the win.** Three features stand out: the per-deal
-  transposition table of card patterns, keeping the whole deal in it, and DDS's lead weights.
-  Without the table at all, ddfast is 16× *slower* than DDS. Next come skipping cards outside
-  the relevant set (1.39×), the bounds (1.20×) and the follow-hand rules (1.16×).
-- **Hardware pext/pdep is the most valuable low-level feature (1.52×)**, more than all the
-  AVX-512 code together (1.29×).
-- **The two endgame tables stand in for each other.** Each one alone saves 3-4%; both together
-  save 30%.
+Things DDS also has are not turned off: the transposition table itself, DDS's lead weights,
+the quick-trick and later-trick bounds, second-hand quick tricks, and skipping cards below a
+suit's lowest winning rank. How much the hand representation is worth as a whole is measured
+separately, by running ddfast with DDS's search (see below).
+
+- **The largest additions are the follow-hand rules (1.66× over DDS's follow weights),
+  hardware pext/pdep (1.52×) and the two endgame tables together (1.30×).** All of the AVX-512
+  code together is worth 1.29×.
+- **The follow-hand rules search about as many nodes as DDS's follow weights** (DDS's weights
+  search 3% fewer). Five cheap rules choose a follower's card about as well as DDS's weights,
+  at a fraction of the cost.
+- **Rewriting DDS's lead weights and bounds on the hand words** is worth 1.24× and 1.07×,
+  compared with running DDS's code through the port.
+- **The two endgame tables stand in for each other.** Either one alone saves 3-4%; both
+  together save 30%.
+- **The transposition-table improvements are small:** storing bound cutoffs (3%), copying
+  4-card table hits (4-5%) and matching 8 entries at once (6%). Choosing the matching entry
+  with the fewest relevant cards is worth nothing.
 - **Memory tuning hardly matters.** Huge pages and software prefetch are each worth under 1%.
 
 ## Method
@@ -29,78 +41,86 @@ on, and the solver was timed again. Every variant still gave the right answer on
   about ±1% across the study, so differences under about 2% are within noise.
 - **DDS:** `SolveBoard` (target -1, one solution, one thread) on the same deals, timed the same
   way (`bench_solve dds`).
-- **Nodes:** from a `-DSTATS` build of each variant. The full build searches 82,915,440 nodes.
+- **Nodes:** from a `-DSTATS` build of each variant, counting lead and follow nodes. The full
+  build searches 82,915,440.
 - **Correctness:** every timed run is checked against the set's DDS answers.
-- **Columns:** slowdown is variant cycles ÷ full cycles. "Left of 4.29×" is what remains of
-  ddfast's lead over DDS. Share is log(slowdown) ÷ log(4.29): the feature's part of the
-  speed-up on a log scale. Features interact, so the shares don't add up to 1.
+- **Columns:** slowdown is variant cycles ÷ full cycles. "Left of 4.25×" is what remains of
+  ddfast's lead over DDS. Share is log(slowdown) ÷ log(4.25): the addition's part of the
+  speed-up on a log scale. Additions interact, so the shares don't add up to 1.
 
 ## Results
 
-| Feature turned off | How | Nodes | Slowdown | Left of 4.29× | Share |
-|---|---|---:|---:|---:|---:|
-| **Search** | | | | | |
-| Per-deal transposition table | `TT_MIN_N=14` | ×99.6 | ×69.7 | 0.06× | 2.91 |
-| Table holds the whole deal (256 KB pool, resets) | `POOL_BITS=12` | ×3.96 | ×3.76 | 1.14× | 0.91 |
-| DDS's lead weights | `DORD=99` | ×1.94 | 1.96× | 2.19× | 0.46 |
-| Skip cards outside the relevant set | `ABL_SW=7` | ×1.75 | 1.39× | 3.11× | 0.23 |
-| Bounds at lead nodes (quick and later tricks) | `DMIN=99 DORD=4 DQ2=4` | ×1.27 | 1.20× | 3.60× | 0.12 |
-| Follow-hand rules (five rules together) | `COV2=0 COVB=0 COVPL=0 DISC=0 VOIDR=0` | ×1.16 | 1.16× | 3.71× | 0.10 |
-| Fitted first guess (middle target instead) | `ABL_GUESS_MID` | ×1.02 | 1.03× | 4.25× | 0.02 |
-| Run extension of relevant cards | `RUNOPT=0` | ×1.04 | 1.01× | 4.28× | 0.01 |
-| **Representation** | | | | | |
-| Hardware pext/pdep (BMI2) | `ABL_SOFT_BITS` (byte tables, as on Arm) | same | 1.52× | 2.83× | 0.29 |
-| Whole-word quick tricks (per-suit loops instead) | `OLD_QT OLD_COMM` | same | 1.07× | 4.02× | 0.05 |
-| **Vector computing (AVX-512)** | | | | | |
-| All AVX-512 (scalar paths, `-mno-avx512f`) | five switches below | same | 1.29× | 3.34× | 0.17 |
-| ↳ DDS's lead weights for all cards at once | `OLD_ORDER` | same | 1.09× | 3.95× | 0.06 |
-| ↳ Move pick: highest of 16 keys at once | `ABL_SCALAR_PICK` | same | 1.08× | 4.00× | 0.05 |
-| ↳ Per-deal table: 8 entries matched at once | `ABL_SCALAR_TT` | same | 1.06× | 4.06× | 0.04 |
-| ↳ 4-card pattern table: 8 entries at once | `ABL_SCALAR_PMATCH` | same | 1.01× | 4.26× | 0.01 |
-| **DDS's code rewritten on hand words** | | | | | |
-| Bounds (DDS's code, ported, instead) | `PORT_BOUNDS` | same | 1.08× | 4.00× | 0.05 |
-| **Endgame tables (ddclaim)** | | | | | |
-| 3-card and 4-card tables both | `LEAN_NOT3=1 LEAN_NOP4=1` | ×1.56 | 1.30× | 3.31× | 0.18 |
-| ↳ 3-card table alone | `LEAN_NOT3=1` | ×1.07 | 1.04× | 4.12× | 0.03 |
-| ↳ 4-card pattern table alone | `LEAN_NOP4=1` | ×1.07 | 1.03× | 4.16× | 0.02 |
-| **Memory** | | | | | |
-| Huge pages for the per-deal table | `LEAN_NOHUGE_TT=1` | same | 1.01× | 4.26× | 0.01 |
-| Huge pages everywhere | `LEAN_NOHUGE=1` | same | 1.01× | 4.27× | 0.01 |
-| Software prefetch | `ABL_NOPREFETCH` | same | 1.00× | 4.29× | 0.00 |
+Each row is an addition DDS doesn't have. "Back to" is what replaces it in the variant.
 
-"Same" means exactly 82,915,440 nodes: the feature changes how fast each node is handled,
+| Addition | Back to | Switch | Nodes | Slowdown | Left of 4.25× | Share |
+|---|---|---|---:|---:|---:|---:|
+| **Transposition table** | | | | | | |
+| Bound cutoffs stored in the table | not stored, as in DDS | `ABL_NO_BOUNDSTORE` | +1.5% | 1.03× | 4.13× | 0.02 |
+| 4-card table hits copied into the table | not copied | `ABL_NO_P4STORE` | −0.5% | 1.04× | 4.07× | 0.03 |
+| Of several matching entries, the one with fewest relevant cards | first match | `TTPICK=0` | +3.2% | 1.00× | 4.27× | 0.00 |
+| 8 entries matched at once (AVX-512) | scalar loop | `ABL_SCALAR_TT` | same | 1.06× | 4.02× | 0.04 |
+| **Search** | | | | | | |
+| Follow-hand rules (cover, discard, void ruff) | DDS's follow weights | `DFOL=2`, rules off | −3.4% | **1.66×** | 2.57× | 0.35 |
+| Endgame tables, 3-card and 4-card | searched | `LEAN_NOT3=1 LEAN_NOP4=1` | +56% | 1.30× | 3.26× | 0.18 |
+| ↳ 3-card table alone | searched | `LEAN_NOT3=1` | +7.3% | 1.04× | 4.07× | 0.03 |
+| ↳ 4-card pattern table alone | searched | `LEAN_NOP4=1` | +7.5% | 1.03× | 4.12× | 0.02 |
+| Fitted first guess | DDS's first target | `ABL_GUESS_DDS` | +1.2% | 1.02× | 4.18× | 0.01 |
+| Extra weight for the table's best lead | DDS's best-move bonus only | `HX=0` | +1.2% | 1.02× | 4.18× | 0.01 |
+| Lead memory at 12 cards | none | `NOMEM` | +0.3% | 1.00× | 4.24× | 0.00 |
+| Run extension of relevant cards | none | `RUNOPT=0` | +3.5% | 1.00× | 4.25× | 0.00 |
+| **Representation and instructions** | | | | | | |
+| Hardware pext/pdep (BMI2) | byte tables, as on Arm | `ABL_SOFT_BITS` | same | **1.52×** | 2.80× | 0.29 |
+| DDS's lead weights rewritten on hand words | DDS's code through the port | `PORT_ORDER` | same | 1.24× | 3.42× | 0.15 |
+| DDS's bounds rewritten on hand words | DDS's code through the port | `PORT_BOUNDS` | same | 1.07× | 3.96× | 0.05 |
+| Quick tricks on whole words | per-suit loops | `OLD_QT OLD_COMM` | same | 1.02× | 4.15× | 0.02 |
+| **AVX-512** | | | | | | |
+| All AVX-512 (scalar paths, `-mno-avx512f`) | scalar | five switches | same | 1.29× | 3.30× | 0.18 |
+| ↳ Lead weights for all cards at once | scalar | `OLD_ORDER` | same | 1.09× | 3.91× | 0.06 |
+| ↳ Move pick: highest of 16 keys at once | scalar | `ABL_SCALAR_PICK` | same | 1.08× | 3.95× | 0.05 |
+| ↳ Per-deal table: 8 entries at once | scalar | `ABL_SCALAR_TT` | same | 1.06× | 4.02× | 0.04 |
+| ↳ 4-card pattern table: 8 entries at once | scalar | `ABL_SCALAR_PMATCH` | same | 1.01× | 4.21× | 0.01 |
+| **Memory** | | | | | | |
+| Huge pages everywhere | 4 KB pages | `LEAN_NOHUGE=1` | same | 1.01× | 4.22× | 0.01 |
+| Huge pages for the per-deal table | 4 KB pages | `LEAN_NOHUGE_TT=1` | same | 1.01× | 4.23× | 0.00 |
+| Software prefetch | none | `ABL_NOPREFETCH` | same | 1.00× | 4.24× | 0.00 |
+
+"Same" means exactly 82,915,440 nodes: the addition changes how fast each node is handled,
 not what is searched.
 
 ## Findings
 
-**The per-deal table carries the design.** Without it the search visits 100 times as many
-nodes. Keeping a whole deal in it matters almost as much. With a 256 KB pool that has to
-reset, nodes rise fourfold and only 1.14× of the lead over DDS is left. The table's size and
-its never-evict policy are as important as having it at all.
+**The follow-hand rules are ddfast's biggest search addition.** DDS gives every card of the
+second, third and fourth hands a weight and sorts by it. ddfast picks each follower's first card
+with five cheap rules instead: cover an honour, play low second hand, discard from length, ruff
+when void, and play above third hand when partner is long. With DDS's weights the search is
+slightly smaller (3% fewer nodes), but every follow node costs much more, so the whole solver is
+1.66× slower.
 
-**DDS's lead weights are essential, and ddfast's own rules take the place of DDS's follow
-weights.** Without DDS's weights at lead nodes, nodes almost double. At follow nodes ddfast
-uses no DDS ordering at all. Five cheap rules (second-hand cover, discards, ruffing when void)
-do that job, and they are worth 16%.
+**pext/pdep is what makes one word per hand pay off.** Software pext/pdep, using the byte tables
+of the Arm port, costs 52% with exactly the same search. Rewriting DDS's lead weights and bounds
+on the hand words (1.24× and 1.07× over DDS's code through the port) depends on it too.
 
-**Skipping cards outside the relevant set is worth more than any single low-level
-optimisation except pext/pdep (1.39×).** When a card fails and was not among the cards that
-decided the result, its equals in the same suit can't do better, so they are skipped.
-
-**pext/pdep is what makes one word per hand pay off.** Software pext/pdep, using the byte
-tables of the Arm port, costs 52% with exactly the same search. The four AVX-512 kernels
-measured one at a time come to about 24%. Removing AVX-512 entirely costs 29%; the difference
-is most likely the AVX-512 code the compiler generates on its own.
+**AVX-512 helps, but less than pext/pdep.** The four kernels measured one at a time come to
+about 24%. Removing AVX-512 entirely costs 29%; the difference is most likely the AVX-512 code
+the compiler generates on its own.
 
 **The tables are worth keeping, but only as a pair.** Either table alone is cheap to lose,
 because the other one, the per-deal table and the bounds catch most of the same endings. With
 both gone, nodes rise 56% and time 30%.
 
+**ddfast's table improvements over a plain table are modest.** Storing bound cutoffs and copying
+4-card table hits each save 3-5% of time. Matching 8 entries at once saves 6%. Choosing the entry
+with the fewest relevant cards saves nodes but not time, and could be dropped. The table's size
+matters more than any of these: in an earlier run, a table too small to hold one deal (256 KB,
+resetting) searched four times the nodes and was 3.8× slower. DDS's table differs in structure
+as well, which this study doesn't measure.
+
+**Small additions near the noise:** the fitted first guess, the extra weight for the table's
+best lead, lead memory and the run extension are each worth 2% or less. The run extension saves
+3.5% of nodes but no time.
+
 **Memory latency is not the bottleneck.** Huge pages and prefetch are each worth under 1%. A
 deal's working set is small enough for the caches.
-
-**Some features save nodes but not time.** The run extension saves 3.5% of nodes but only
-about 1% of cycles. The second-hand quick tricks and the fitted guess are similar.
 
 ## ddfast running DDS's search, against DDS
 
@@ -154,9 +174,8 @@ trump and no-trump weight functions).
 
 ## Caveats
 
-- **Noise:** about ±1% from run to run. The per-suit quick-tricks row came out at 1.024× in an
-  earlier run in normal power mode and 1.068× here, so its true value lies somewhere in that
-  range.
+- **Noise:** about ±1% from run to run. The per-suit quick-tricks row has come out at 1.024×,
+  1.068× and 1.024× in three runs, so treat it as 2-7%.
 - **The leave-one-out table doesn't measure the representation as a whole.** It changes the
   instructions ddfast uses on its hand words, not the hand words themselves. For the whole
   representation, see the comparison with DDS's search above.
@@ -164,8 +183,9 @@ trump and no-trump weight functions).
   representation; see the comparison with DDS's search.
 - **Not covered:** parallel solving (`solve_parallel`, `solve_deal_parallel`) and interleaved
   searches (`NCTX`, already off in ddfast).
-- An earlier run in normal power mode gave the same order of features, with factors within
-  1-2%. In that run ddfast was 4.21× faster than DDS.
+- Earlier runs (normal power mode, and an earlier list that also turned off features DDS has)
+  gave the same factors within 1-2% for the rows they share. ddfast measured 4.21-4.34× DDS
+  across runs.
 
 ## Reproducing
 
