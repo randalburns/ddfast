@@ -262,6 +262,10 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
 #ifndef DQ2
 #define DQ2 DMIN
 #endif
+// S->trk (the cards played to the current trick) is read only by the port's follow ordering
+// (dds_order with K >= 1); the lead card reaches follow 1 as its best card. Without DFOL* the
+// stores are dead, and as stores through a pointer they made the compiler reload H and LENS.
+#define TRK_NEEDED (DFOL1 <= 13 || DFOL2 <= 13 || DFOL3 <= 13)
 namespace port = ddfast::port;
 // The per-deal transposition table. A directory maps the exact key (suit lengths of lanes
 // 1-3, leader, card count) to a chain of blocks of 8 patterns; blocks come from a pool that
@@ -2688,7 +2692,7 @@ bool lead(int n, int L, int target, u64& R) {
     STAT(nodes1 = g_nodes);
     STAT(firstc = firstc ? firstc : c);
     const int sh = 16 * L + 4 * suit_of(c);
-    S->trk[n][0] = c;
+    if constexpr (TRK_NEEDED) S->trk[n][0] = c;
     H[L] ^= c;
     LENS -= 1ull << sh;
 #if defined(ORACLE) && defined(OR_BIG)
@@ -3161,7 +3165,7 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
   alignas(64) u64 cards[16];
   alignas(32) uint16_t key[16];
   if (K == 1 && n >= DQ2) {
-    const u64 lc = S->trk[n][0];
+    const u64 lc = best;  // follow 1: the lead card
     const bool hit = native_second<NT>(s, lc, cut ? target : n + 1 - target, R);
 #ifdef VERIFY_ORDER
     {
@@ -3293,7 +3297,7 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
     if (first) why0 = why;
 #endif
     tried |= c;
-    S->trk[n][K] = c;
+    if constexpr (TRK_NEEDED) S->trk[n][K] = c;
     const bool same = (c & lane_of(best)) != 0, ruff = (c & TR) != 0;
     const bool beats = same ? c > best : ruff;
     const u64 nb = beats ? c : best;
