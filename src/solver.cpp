@@ -3167,6 +3167,13 @@ FOLLOW_ATTR bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, i
     {
       port::Pos& t = S->pos[n];
       fill_holdings(t);
+      // As in DDS, rank_in_suit has the led card out, but aggr, winner and second_best
+      // still describe the trick start: count the led card back in for those.
+      t.aggr[suit_of(lc)] |= uint16_t(lc >> (16 * suit_of(lc)));
+      H[(s + 3) & 3] ^= lc;
+      fill_tops(n, t);
+      H[(s + 3) & 3] ^= lc;
+      t.tricks_max = 0;
       t.lead = port::MoveType{suit_of(lc), (__builtin_ctzll(lc) & 15) + 2, 0, 0};
       clear_wr(t);
       const bool h2 = port::QuickTricksSecondHand(t, s, 4 * (n - 1) - 1, target, NT ? 4 : 3);
