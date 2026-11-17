@@ -69,6 +69,8 @@ void dbg_hit(const uint64_t* h, int L, bool nt, int target, bool res, uint64_t m
 namespace {
 int g_sw = getenv("SW") ? atoi(getenv("SW")) : 15;
 #define SW(b) (g_sw & (b))
+#elif defined(ABL_SW)  // leave-one-out: 8 = skip cards outside the relevant set
+#define SW(b) ((ABL_SW) & (b))
 #else
 #define SW(b) 1
 #endif
@@ -1825,7 +1827,7 @@ u64 g_dup = 0;
 // Transposition-table block matching (8 entries a block). Narrow entries: e[0..7] the masked
 // values, e[8..15] the masks with the bounds bits; wide entries: e[0..7] the masks with the
 // bounds, e[8..15] and e[16..23] the two masked values.
-#if DDCLAIM_X86
+#if DDCLAIM_X86 && !defined(ABL_SCALAR_TT)
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   const __m512i vb = _mm512_load_si512(e + 8);
   const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
@@ -1847,6 +1849,30 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
   const __m512i pcv = _mm512_or_si512(_mm512_slli_epi64(_mm512_popcnt_epi64(_mm512_and_si512(_mm512_load_si512(v), _mm512_set1_epi64((long long)m))), 3),
                                       _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
   return _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
+}
+#elif DDCLAIM_X86  // ABL_SCALAR_TT: the same, one entry at a time
+inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
+  unsigned k = 0;
+  for (int i = 0; i < 8; i++) k |= unsigned((e[8 + i] & own) == e[i] && (e[8 + i] & dec)) << i;
+  return k;
+}
+inline unsigned tt_match_wide(const u64* e, u64 ewq, u64 swq, int target) {
+  unsigned k = 0;
+  for (int i = 0; i < 8; i++) {
+    const u64 m = e[i] & W52, lo = (e[i] >> 52) & 15, hi = (e[i] >> 56) & 15;
+    k |= unsigned((m & ewq) == e[8 + i] && (m & swq) == e[16 + i] && (lo >= u64(target) || hi < u64(target))) << i;
+  }
+  return k;
+}
+inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
+  u64 best = ~u64(0);
+  while (kd) {
+    const unsigned i = unsigned(__builtin_ctz(kd));
+    kd &= kd - 1;
+    const u64 c = u64(popc(v[i] & m)) << 3 | i;
+    best = c < best ? c : best;
+  }
+  return best;
 }
 #else
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
@@ -3548,7 +3574,13 @@ template <bool NT>
 int solve_one(int n, int L, int first) {
   ensure_state();
   int lo = 0, hi = n;
+#ifdef ABL_GUESS_MID  // leave-one-out: the middle target instead of the fitted guess
+  int t = first > 0 ? first : (n + 1) / 2;
+#elif defined(ABL_GUESS_DDS)  // DDS's first target: 7 tricks for the leader's side, 6 when E-W lead
+  int t = first > 0 ? first : (L & 1) ? n + 1 - (n + 1) / 2 + 1 : (n + 1) / 2;
+#else
   int t = first > 0 ? first : guess<NT>(n, L);
+#endif
 #ifndef GOFF
 #define GOFF 0
 #endif
@@ -3773,6 +3805,7 @@ void init(const char* dir) {
   ddclaim::tables::attach();  // this file's copy of the table state (see ddclaim/tables.hpp)
   if (getenv("LEAN_NOP4")) g_pt[0].use = false;
   if (getenv("LEAN_NOT3")) g_use3 = false;
+  if (getenv("LEAN_NOT2")) g_use2 = false;  // leave-one-out / DDS-search study: search 2-card endings
 #ifdef STATS
   g_nodes = g_leads = g_queries = g_tthit = g_qt = g_lt = g_ttlook = 0;
   memset(g_plook, 0, sizeof g_plook), memset(g_phit, 0, sizeof g_phit);

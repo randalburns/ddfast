@@ -24,9 +24,17 @@ typedef uint64_t u64;
 
 inline int clz64(u64 x) { return std::countl_zero(x); }  // 64 for 0, like lzcnt
 inline int ctz64(u64 x) { return std::countr_zero(x); }  // 64 for 0, like tzcnt
+#ifdef ABL_NOPREFETCH  // leave-one-out: no software prefetch
+inline void prefetch(const void*) {}
+#else
 inline void prefetch(const void* p) { __builtin_prefetch(p, 0, 3); }
+#endif
 
-#if DDCLAIM_X86
+// Leave-one-out switches (bench/loo.sh; the defaults are the normal build): ABL_SOFT_BITS
+// replaces BMI2 pext/pdep on x86 by the byte-table code used on Arm; ABL_SCALAR_TT,
+// ABL_SCALAR_PMATCH and ABL_SCALAR_PICK replace the AVX-512 match8, pmatch8 and best_key
+// by scalar loops.
+#if DDCLAIM_X86 && !defined(ABL_SOFT_BITS)
 
 inline u64 pext64(u64 x, u64 m) { return _pext_u64(x, m); }
 inline u64 pdep64(u64 x, u64 m) { return _pdep_u64(x, m); }
@@ -44,41 +52,7 @@ struct BitMask {
   u64 dep(u64 x) const { return _pdep_u64(x, m); }
 };
 
-// Bytes 0..7 of x reordered by ctl[0..7] (an index 0..7, or 0x80 for a zero byte). ctl is
-// 16-byte aligned.
-inline u64 shuf8(u64 x, const uint8_t* ctl) {
-  return u64(_mm_cvtsi128_si64(
-      _mm_shuffle_epi8(_mm_cvtsi64_si128((long long)x), _mm_load_si128((const __m128i*)ctl))));
-}
-
-// Bit i set when (mask[i] & own) == val[i], for i < 8. mask and val are 64-byte aligned.
-inline unsigned match8(const u64* mask, const u64* val, u64 own) {
-  return _mm512_cmpeq_epi64_mask(_mm512_and_si512(_mm512_load_si512(mask), _mm512_set1_epi64((long long)own)),
-                                 _mm512_load_si512(val));
-}
-
-// Pattern-table group: bit i set when entry i matches (b[i] & own) == a[i] and its bounds
-// (bits 56-58 low, 59-61 high) decide target tl.
-inline unsigned pmatch8(const u64* a, const u64* b, u64 own, int tl) {
-  const __m512i vo = _mm512_set1_epi64((long long)own), vt = _mm512_set1_epi64(tl);
-  const __m512i vb = _mm512_load_si512(b);
-  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, vo), _mm512_load_si512(a));
-  const __m512i vlo = _mm512_and_si512(_mm512_srli_epi64(vb, 56), _mm512_set1_epi64(7));
-  const __m512i vhi = _mm512_and_si512(_mm512_srli_epi64(vb, 59), _mm512_set1_epi64(7));
-  return k & (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));
-}
-
-// The highest key[i] among the slots i < 16 with cards[i] & cand nonzero (0 if none).
-// cards is 64-byte aligned, key 32-byte aligned.
-inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
-  const __mmask16 live = __mmask16(_mm512_test_epi64_mask(_mm512_load_si512(cards), _mm512_set1_epi64((long long)cand)) |
-                                   _mm512_test_epi64_mask(_mm512_load_si512(cards + 8), _mm512_set1_epi64((long long)cand)) << 8);
-  const __m256i kv = _mm256_maskz_mov_epi16(live, _mm256_load_si256((const __m256i*)key));
-  const __m128i mx = _mm_max_epu16(_mm256_castsi256_si128(kv), _mm256_extracti128_si256(kv, 1));
-  return 0xFFFF - unsigned(_mm_extract_epi16(_mm_minpos_epu16(_mm_xor_si128(mx, _mm_set1_epi16(-1))), 0));
-}
-
-#else  // DDCLAIM_ARM
+#else  // software pext/pdep: AArch64, or x86 with ABL_SOFT_BITS
 
 // pext/pdep a byte at a time through 256 x 256 tables (64 KB each, so both stay in a
 // performance core's 128 KB L1). The eight bytes are independent: each one's output offset
@@ -105,7 +79,13 @@ inline const ByteTables g_bytes;
 
 // Byte k: the number of mask bits in bytes 0 .. k-1.
 __attribute__((always_inline)) inline u64 byte_offsets(u64 m) {
+#if DDCLAIM_ARM
   const u64 c = vget_lane_u64(vreinterpret_u64_u8(vcnt_u8(vcreate_u8(m))), 0);
+#else  // the popcount of each byte, by halves (x86 with ABL_SOFT_BITS)
+  u64 c = m - ((m >> 1) & 0x5555555555555555ull);
+  c = (c & 0x3333333333333333ull) + ((c >> 2) & 0x3333333333333333ull);
+  c = (c + (c >> 4)) & 0x0F0F0F0F0F0F0F0Full;
+#endif
   return (c * 0x0101010101010101ull) << 8;
 }
 
@@ -146,6 +126,68 @@ inline u64 lane_nibbles(u64 x, int k) {
   x >>= 4 * k;
   return (x & 0xF) | (x >> 12 & 0xF0) | (x >> 24 & 0xF00) | (x >> 36 & 0xF000);
 }
+
+#endif
+
+#if DDCLAIM_X86
+
+// Bytes 0..7 of x reordered by ctl[0..7] (an index 0..7, or 0x80 for a zero byte). ctl is
+// 16-byte aligned.
+inline u64 shuf8(u64 x, const uint8_t* ctl) {
+  return u64(_mm_cvtsi128_si64(
+      _mm_shuffle_epi8(_mm_cvtsi64_si128((long long)x), _mm_load_si128((const __m128i*)ctl))));
+}
+
+// Bit i set when (mask[i] & own) == val[i], for i < 8. mask and val are 64-byte aligned.
+inline unsigned match8(const u64* mask, const u64* val, u64 own) {
+#ifdef ABL_SCALAR_TT
+  unsigned k = 0;
+  for (int i = 0; i < 8; i++) k |= unsigned((mask[i] & own) == val[i]) << i;
+  return k;
+#else
+  return _mm512_cmpeq_epi64_mask(_mm512_and_si512(_mm512_load_si512(mask), _mm512_set1_epi64((long long)own)),
+                                 _mm512_load_si512(val));
+#endif
+}
+
+// Pattern-table group: bit i set when entry i matches (b[i] & own) == a[i] and its bounds
+// (bits 56-58 low, 59-61 high) decide target tl.
+inline unsigned pmatch8(const u64* a, const u64* b, u64 own, int tl) {
+#ifdef ABL_SCALAR_PMATCH
+  unsigned k = 0;
+  for (int i = 0; i < 8; i++) {
+    const u64 lo = (b[i] >> 56) & 7, hi = (b[i] >> 59) & 7;
+    k |= unsigned((b[i] & own) == a[i] && (lo >= u64(tl) || hi < u64(tl))) << i;
+  }
+  return k;
+#else
+  const __m512i vo = _mm512_set1_epi64((long long)own), vt = _mm512_set1_epi64(tl);
+  const __m512i vb = _mm512_load_si512(b);
+  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, vo), _mm512_load_si512(a));
+  const __m512i vlo = _mm512_and_si512(_mm512_srli_epi64(vb, 56), _mm512_set1_epi64(7));
+  const __m512i vhi = _mm512_and_si512(_mm512_srli_epi64(vb, 59), _mm512_set1_epi64(7));
+  return k & (_mm512_cmpge_epi64_mask(vlo, vt) | _mm512_cmplt_epi64_mask(vhi, vt));
+#endif
+}
+
+// The highest key[i] among the slots i < 16 with cards[i] & cand nonzero (0 if none).
+// cards is 64-byte aligned, key 32-byte aligned.
+inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
+#ifdef ABL_SCALAR_PICK
+  unsigned m = 0;
+  for (int i = 0; i < 16; i++)
+    if ((cards[i] & cand) && key[i] > m) m = key[i];
+  return m;
+#else
+  const __mmask16 live = __mmask16(_mm512_test_epi64_mask(_mm512_load_si512(cards), _mm512_set1_epi64((long long)cand)) |
+                                   _mm512_test_epi64_mask(_mm512_load_si512(cards + 8), _mm512_set1_epi64((long long)cand)) << 8);
+  const __m256i kv = _mm256_maskz_mov_epi16(live, _mm256_load_si256((const __m256i*)key));
+  const __m128i mx = _mm_max_epu16(_mm256_castsi256_si128(kv), _mm256_extracti128_si256(kv, 1));
+  return 0xFFFF - unsigned(_mm_extract_epi16(_mm_minpos_epu16(_mm_xor_si128(mx, _mm_set1_epi16(-1))), 0));
+#endif
+}
+
+#else  // DDCLAIM_ARM
 
 inline u64 shuf8(u64 x, const uint8_t* ctl) {
   return vget_lane_u64(vreinterpret_u64_u8(vtbl1_u8(vcreate_u8(x), vld1_u8(ctl))), 0);
@@ -197,7 +239,6 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
   }
   return vmaxvq_u16(best);
 }
-
 #endif
 
 // Hand-word run helpers. A hand word has suit s in bits 16s .. 16s+12 and a guard bit at
@@ -209,16 +250,16 @@ constexpr u64 GUARD_BITS = 0x8000800080008000ull;
 // directly below in play (the run has more cards).
 inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
   const u64 p = present | GUARD_BITS;
-  const u64 pm = _pext_u64(mine, p), hc = pm & ~(pm >> 1);
-  if (seq) *seq = _pdep_u64(hc & (pm << 1), p);
-  return _pdep_u64(hc, p);
+  const u64 pm = pext64(mine, p), hc = pm & ~(pm >> 1);
+  if (seq) *seq = pdep64(hc & (pm << 1), p);
+  return pdep64(hc, p);
 }
 inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
   const u64 p = present | GUARD_BITS;
-  const u64 pm = _pext_u64(rest, p), bc = _pext_u64(c, p);
+  const u64 pm = pext64(rest, p), bc = pext64(c, p);
   const u64 t = ~pm & (bc - 1);
   const u64 bb = 1ull << (64 - _lzcnt_u64(t));  // just above the highest gap below c, or bit 0
-  return _pdep_u64(bb, p);
+  return pdep64(bb, p);
 }
 #else
 // The present cards whose next card in play below (same suit) is in `seeds` (a subset of the

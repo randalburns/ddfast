@@ -4,6 +4,8 @@
 //
 // usage: bench_solve set FILE [count]                one thread (pin it: taskset -c 0 ...)
 //        bench_solve random N SEED                   one thread; DDS answers computed first
+//        bench_solve dds FILE [count]                DDS (one SolveBoard per problem) on one thread, measured
+//                                                    the same way: the baseline for bench/loo.sh
 //        bench_solve parallel FILE [cpus] [reps]     solve_parallel on cpus (default auto)
 //        bench_solve deal FILE reps CFG...           latency of one deal: each CFG is "1t" (solve()
 //                                                    on this thread) or a cpu list for
@@ -109,12 +111,12 @@ int main(int argc, char** argv) {
   }
   const std::string mode = argv[1];
   TestSet s;
-  if (mode == "set" || mode == "parallel") {
+  if (mode == "set" || mode == "parallel" || mode == "dds") {
     if (!read_set(argv[2], s)) {
       fprintf(stderr, "cannot read %s\n", argv[2]);
       return 2;
     }
-    if (mode == "set" && argc > 3 && size_t(atol(argv[3])) < s.problems.size()) {
+    if ((mode == "set" || mode == "dds") && argc > 3 && size_t(atol(argv[3])) < s.problems.size()) {
       s.problems.resize(size_t(atol(argv[3])));
       s.answers.resize(s.problems.size());
     }
@@ -126,9 +128,29 @@ int main(int argc, char** argv) {
     fprintf(stderr, "unknown mode %s\n", argv[1]);
     return 2;
   }
-  init_or_exit();
   const size_t n = s.problems.size();
   std::vector<uint8_t> got(n, 0xFF);
+  if (mode == "dds") {
+    SetMaxThreads(1);
+    dds_solve(s.problems[0]);  // warm-up (DDS allocates on first use)
+    const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
+    const long long cyc0 = perf_read(fc), ins0 = perf_read(fi);
+    const double t0 = now();
+    unsigned long long dnodes = 0;
+    for (size_t i = 0; i < n; i++) {
+      uint32_t nd = 0;
+      got[i] = uint8_t(dds_solve(s.problems[i], &nd));
+      dnodes += nd;
+    }
+    const double secs = now() - t0;
+    const long long cyc = cyc0 < 0 ? -1 : perf_read(fc) - cyc0, ins = ins0 < 0 ? -1 : perf_read(fi) - ins0;
+    if (cyc >= 0 && ins >= 0) printf("cycles/deal %.0f  instructions/deal %.0f\n", double(cyc) / n, double(ins) / n);
+    size_t wrong = 0;
+    for (size_t i = 0; i < n; i++) wrong += got[i] != s.answers[i];
+    printf("%zu deals (DDS): %.1f deals/s (%.0f us each)  nodes %llu (%.0f per deal)  %s\n", n, n / secs, 1e6 * secs / n, dnodes, double(dnodes) / n, wrong ? "WRONG" : "all correct");
+    return wrong ? 1 : 0;
+  }
+  init_or_exit();
   if (mode == "parallel") {
     const std::vector<int> cpus = parse_cpus(argc > 3 ? argv[3] : "auto");
     const int reps = argc > 4 ? atoi(argv[4]) : 3;
