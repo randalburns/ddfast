@@ -2,9 +2,14 @@
 
 ddfast is a performance optimization of the search algorithms of
 [DDS](https://github.com/dds-bridge/dds), the widely used exact double-dummy solver for bridge.
-Given four 13-card hands, a strain and a declarer, it returns the number of tricks declarer's
-side takes with best play by both sides, the same answer as DDS, about four times faster on
-one core.
+Given a deal, a strain and a declarer, it returns the number of tricks declarer's side takes
+with best play by both sides, the same answer as DDS, about four times faster on one core.
+
+It isn't limited to full deals. Like DDS, it solves any position reached in play: a trick start
+with 1 to 13 cards in each hand, or a position in the middle of a trick. It also gives every
+legal card with its result, analyses a played sequence card by card, answers single "at least
+k tricks?" questions (claims), and computes full tables and par (see
+[Positions, play and par](#positions-play-and-par)).
 
 It keeps DDS's approach to the double-dummy search: an alpha-beta search asked a sequence of
 "at least t tricks?" questions, a transposition table of positions reduced to the cards that
@@ -44,6 +49,10 @@ On one core of an AMD Ryzen AI 9 HX 370 (CPU 0, a Zen 5 core), against DDS at co
 
 On the 600 deals of `tests/data/public.set` ddfast takes 16.1M cycles per deal (313 deals/s).
 The parallel calls spread a batch over a pinned thread pool; see `bench/`.
+
+Positions with fewer cards are faster still, relative to DDS (random trick starts, one at a
+time, `bench/positions_vs_ddclaim.sh`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
+at 7 and 58x at 5. Batches of small positions (`solve_positions`) gain another 1.2-1.5x.
 
 On one performance core of an Apple M5 (macOS; see "The macOS port" below), against
 the same DDS built with the same compiler and flags, cycles per deal (min of 3 alternating
