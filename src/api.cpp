@@ -202,6 +202,45 @@ void solve(const Problem* problems, size_t n, uint8_t* tricks) {
     if (problems[i].declarer & 1) tricks[i] = uint8_t(13 - tricks[i]);
 }
 
+namespace {
+// Fills q from p; the cards per hand, or -1 if p is not a valid position.
+int to_claim(const Position& p, ddclaim::Position& q) {
+  int n = -1;
+  for (int s = 0; s < 4; s++) {
+    int len = 0;
+    for (int h = 0; h < 4; h++) q.hand[s][h] = p.hand[s][h], len += __builtin_popcount(p.hand[s][h]);
+    if (n < 0) n = len;
+    if (len != n) return -1;
+  }
+  if (n < 1 || n > 13 || p.trump > 4 || p.leader > 3) return -1;
+  q.trump = p.trump;
+  q.leader = p.leader;
+  return n;
+}
+}  // namespace
+
+void solve_positions(const Position* positions, size_t n, uint8_t* tricks) {
+  // Positions of up to kInterleaveMax cards a hand are solved kInterleaveCtx at a time,
+  // interleaved: their searches spend much of their time waiting for the endgame tables, and
+  // a waiting search hands over to the next. Larger ones are solved one at a time, as solve()
+  // does (interleaving full deals evicts their tables from the caches; docs/NOTES.md).
+  static const int imax = getenv("DDFAST_INTERLEAVE_MAX") ? atoi(getenv("DDFAST_INTERLEAVE_MAX")) : kInterleaveMax;
+  static const int ictx = getenv("DDFAST_INTERLEAVE_CTX") ? atoi(getenv("DDFAST_INTERLEAVE_CTX")) : kInterleaveCtx;
+  std::vector<ddclaim::Position> small;
+  std::vector<size_t> where;
+  for (size_t i = 0; i < n; i++) {
+    ddclaim::Position q;
+    const int c = to_claim(positions[i], q);
+    if (c < 0) tricks[i] = 0xFF;
+    else if (c <= imax) small.push_back(q), where.push_back(i);
+    else tricks[i] = uint8_t(detail::solve_position(q, false));
+  }
+  if (small.empty()) return;
+  std::vector<uint8_t> out(small.size());
+  detail::solve_positions(small.data(), small.size(), out.data(), ictx);
+  for (size_t k = 0; k < small.size(); k++) tricks[where[k]] = out[k];
+}
+
 int solve_position(const Position& p, bool keep_table) {
   ddclaim::Position q;
   int n = -1;

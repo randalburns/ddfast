@@ -65,6 +65,82 @@ void solve(const Problem* problems, size_t n, uint8_t* tricks);
 // hold for any position in the same strain. Pass false when the strain changes.
 int solve_position(const Position& p, bool keep_table = false);
 
+// North-South's tricks for each of positions[0..n), each solved from an empty table, or 0xFF
+// for a position solve_position() would reject. On the calling thread. Positions of up to
+// kInterleaveMax cards a hand are searched kInterleaveCtx at a time, interleaved (a search
+// that waits for an endgame table hands over to the next), which is much faster per position
+// than solve_position() one at a time; larger positions are solved one at a time.
+constexpr int kInterleaveMax = 10, kInterleaveCtx = 4;
+void solve_positions(const Position* positions, size_t n, uint8_t* tricks);
+
+// ---------------------------------------------------------------------------------------
+// Play: positions in the middle of a trick, card-by-card results, play analysis, targets.
+// Kept simple rather than fast: the cards still to come in the current trick are searched
+// card by card, and each completed trick is solved with the trick-start solver (its table
+// is kept for the whole call).
+
+// A card: suit 0..3 (as hand[seat][suit]), rank 2..14 (14 the ace).
+struct Card {
+  uint8_t suit, rank;
+};
+
+// A position anywhere in the play. hand holds the cards not yet played: the cards already
+// played to the current trick are in trick[0..played) and not in hand. The seats that have
+// played to the trick hold one card fewer than the others. played == 0 is a trick start (a
+// Position). A follower who did not follow suit must hold no card of the suit led.
+struct PlayPosition {
+  uint16_t hand[4][4];
+  uint8_t trump;   // strain: 0..3 the suits, 4 no trumps
+  uint8_t leader;  // the seat that led (or leads) the current trick
+  uint8_t played;  // cards already played to the current trick, 0..3
+  Card trick[3];
+};
+
+// North-South's tricks from p on, the current trick included, with best play; -1 if p is not a
+// valid position. keep_table as for solve_position().
+int solve_play(const PlayPosition& p, bool keep_table = false);
+
+// 1 if North-South take at least `target` tricks from p on (the current trick included), 0 if
+// not, -1 if p is not a valid position. One question, so cheaper than solve_play() (DDS's
+// SolveBoard with a target): a claim of k tricks by North-South holds when at_least(p, k) is 1.
+int at_least(const PlayPosition& p, int target, bool keep_table = false);
+
+// Every legal card of the seat to play, with North-South's tricks (from p on, the current trick
+// included) when that card is played and play is best afterwards (DDS's SolveBoard with
+// solutions 3). out needs room for 13. Returns the number of cards (in suit order, high cards
+// first), or -1 if p is not a valid position.
+struct CardResult {
+  Card card;
+  uint8_t ns_tricks;
+};
+int card_results(const PlayPosition& p, CardResult* out, bool keep_table = false);
+
+// Play analysis (DDS's AnalysePlayBin): from the trick-start position `start`, the cards
+// cards[0..n) are played in order. ns_tricks[i] gets North-South's total tricks after the
+// first i cards: those already won in the sequence plus best play from there (so
+// ns_tricks[0] is the value of start, and a drop marks a mistake). Returns the number of cards
+// played, which is less than n if cards[result] is not a legal play.
+int analyse_play(const Position& start, const Card* cards, int n, uint8_t* ns_tricks);
+
+// Par (DDS's DealerPar) from a table of solve_table(): the result of the auction when both
+// sides know the table, starting with the dealer's side. Each side in turn bids any higher
+// contract (declared by whichever partner takes more tricks in its strain) or passes;
+// contracts that go down are doubled, and two passes in a row end the auction. dealer 0..3
+// (N E S W); vulnerable 0 none, 1 both, 2 North-South, 3 East-West (DDS's codes).
+struct ParContract {
+  uint8_t level;      // 1..7
+  uint8_t strain;     // 0..3 the suits (as Table), 4 no trumps
+  uint8_t side;       // declaring side: 0 North-South, 1 East-West
+  uint8_t declarers;  // bit q: seat q (of that side) can declare it for the par score
+  int8_t result;      // overtricks (>= 0, undoubled) or undertricks (< 0, doubled)
+};
+struct ParResult {
+  int score;            // North-South's par score (positive: North-South gain)
+  int n;                // par contracts in c, cheapest first within each strain and side
+  ParContract c[10];
+};
+void par(const Table& table, int dealer, int vulnerable, ParResult& result);
+
 // The full table of one deal, or of many. On the calling thread. The search table is kept
 // across the four declarers of each strain, so a table costs about half of 20 solve()s.
 void solve_table(const Deal& deal, Table& table);

@@ -219,8 +219,52 @@ int dtricks = ddfast::solve_deal_parallel(p, fast, 4);
 Link with `bin/libddfast.a -pthread`, and compile with `-march=native` (or another target with
 AVX-512 and BMI2) and `-Iinclude`.
 
+### Positions, play and par
+
+Besides whole deals, ddfast covers the rest of DDS's interface. All of these answer from
+North-South's side, and all are checked against DDS (`bin/test_play`).
+
+```cpp
+ddfast::Position q = {};                           // a trick start, 1..13 cards a hand
+int ns = ddfast::solve_position(q);                // North-South's tricks from here
+ddfast::solve_positions(qs, n, out);               // a batch: small positions much faster per position
+
+ddfast::PlayPosition pp = {};                      // anywhere in the play: cards still held, the
+pp.played = 1;                                     // leader of the current trick and the 0..3
+pp.trick[0] = {0, 14};                             // cards already played to it (here the spade ace)
+int v = ddfast::solve_play(pp);                    // North-South's tricks, this trick included
+int ok = ddfast::at_least(pp, 9);                  // one yes/no question: a claim of 9 tricks
+ddfast::CardResult cr[13];
+int nc = ddfast::card_results(pp, cr);             // every legal card with its result (solutions 3)
+uint8_t after[53];
+ddfast::analyse_play(q13, cards, ncards, after);   // North-South's total after each card played
+
+ddfast::ParResult pr;
+ddfast::par(t, dealer, vulnerable, pr);            // par score and contracts from a table
+```
+
+| ddfast | DDS |
+|---|---|
+| `solve`, `solve_parallel` | `SolveBoard`, `SolveAllBoards` |
+| `solve_table(s)`, `solve_tables_parallel` | `CalcDDtable`, `CalcAllTables` |
+| `solve_position`, `solve_positions` | `SolveBoard` at the start of a trick |
+| `solve_play` | `SolveBoard` in the middle of a trick (`currentTrickSuit`/`Rank`) |
+| `at_least` | `SolveBoard` with a target |
+| `card_results` | `SolveBoard` with `solutions` 3 |
+| `analyse_play` | `AnalysePlayBin` |
+| `par` | `DealerPar` (the score; contracts as structs rather than text) |
+
+`solve_positions` searches positions of up to 10 cards a hand four at a time, interleaved on
+the calling thread: a search waiting for an endgame table hands over to the next. On random
+4-7-card positions that is 1.2-1.5x faster than one `solve_position` at a time, and from 7
+cards faster than ddclaim's own solver. In the middle of a trick the cards still to come are
+searched card by card and each completed trick goes to the trick-start solver; kept simple,
+it still solves a deal after its opening lead in about 4 ms (DDS: 13 ms). Par is computed as
+the auction between two sides who know the table: from the dealer's side, each bids any higher
+contract or passes, contracts that go down are doubled, and two passes end it.
+
 Thread safety: after `init()`, `solve`, `solve_table` and `solve_tables` may be called from any
-number of threads at once. The two parallel calls share one pool and must not overlap;
+number of threads at once, as may the calls of this section. The two parallel calls share one pool and must not overlap;
 `solve_deal_parallel` has its own pool and must not overlap them either.
 
 ## Tests and benchmarks
@@ -235,6 +279,10 @@ taskset -c 0 bin/bench_solve set tests/data/public.set     # cycles per deal on 
 bin/bench_solve parallel tests/data/public.set auto        # on the thread pool
 bin/bench_solve deal tests/data/public.set 3 1t 0-3        # latency of one deal: solve() vs 4 cores
 bin/bench_tables 200 4242                                  # tables against DDS CalcDDtable
+bin/test_play 1000 1             # play positions, card results, play analysis and par against DDS
+taskset -c 0 bin/bench_positions 6 20000 21 x.bin dds      # positions of 6 cards a hand vs DDS
+sh bench/positions_vs_ddclaim.sh OUTDIR                    # 3-13 cards vs DDS and ddclaim's solver
+sh bench/loo.sh OUTDIR                                     # the leave-one-out study (docs/LOO.md)
 ```
 
 Every test and benchmark checks every answer against DDS. `tests/data/public.set` holds 600
@@ -248,11 +296,13 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/solver.cpp` | the search |
 | `src/dds_port.hpp` | DDS's quick tricks, later tricks and move ordering, ported (used by the search) |
 | `src/api.cpp` | the interface and the thread pool |
+| `src/play.cpp` | play positions, card results, play analysis, targets and par |
 | `src/guess_*.inc` | fitted first guesses of the result |
 | `extern/ddclaim` | ddclaim (git subtree): the endgame tables, their probes (`include/ddclaim/tables.hpp`) and builder |
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
+| `docs/LOO.md` | what each part of the design is worth (leave-one-out study) |
 
 ## License
 
