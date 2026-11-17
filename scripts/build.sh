@@ -58,7 +58,7 @@ INC="-Iinclude -Iextern/ddclaim/include"
 DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
-# The library: ddclaim (unchanged, as its own build compiles it) and ddfast.
+# The library: ddclaim (the tables, compiled without XFLAGS) and ddfast.
 rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o"
 # shellcheck disable=SC2086
 {

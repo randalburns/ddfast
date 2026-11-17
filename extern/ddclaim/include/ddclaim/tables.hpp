@@ -4,8 +4,8 @@
 // What is here:
 //   - the hand-word helpers: a hand is a 64-bit word, suit s in bits 16s .. 16s+12 (bit 12
 //     the ace); in the searches the trump suit, if any, is lane 3;
-//   - the layout of the two-card table, the three-card table and the pattern tables (4, 5 and
-//     6 cards a hand), loaded by init_tables() and read through attach() (below);
+//   - the layout of the two-card table, the three-card table and the 4-card pattern table,
+//     loaded by init_tables() and read through attach() (below);
 //   - the probes: inline functions that answer "does the leader's side of this ending take at
 //     least `target` tricks", with the set of cards that decided it. They are in this header
 //     so that they inline into the caller's search; ddclaim's own solver uses the same code.
@@ -83,15 +83,16 @@ using bits::u64;
 // order) that matter for that answer. The file t3_v2.bin (377 MB).
 constexpr size_t T3_ARR = 369600, T3_CFG = 102, T3_BYTES = T3_CFG * 2 * T3_ARR * 5;
 
-// Pattern tables for endings of 4, 5 and 6 cards (level = cards - 4), with the side suits
+// The pattern table for endings of 4 cards a hand (level 0; level = cards - 4), with the side suits
 // sorted. A directory maps the suit lengths of all four hands (and the strain) to a run of
 // groups of 8 entries. An entry is a pattern and bounds: a = the owners of the cards that
 // matter (two bits per card, split in two bit strings in compressed order), b = those cards
 // (the same mask under both bit strings), bits 56-58 and 59-61 bounds on the leader's side's
 // tricks, bit 63 set. An unused slot has a = ~0, b = 0. A run stores its a's and then its b's
-// (64 bytes per group each). Files p4_v5.{idx,ent}, p5_v5.*, p6_v5.*. The tables are filled
-// by solving random endings, then frozen.
-constexpr int P_LEVELS = 3;
+// (64 bytes per group each). Files p4_v5.{idx,ent}. The table is filled by
+// solving random six-card endings, then frozen. (ddclaim also had 5- and 6-card levels; they
+// saved ddfast 6% of nodes and no time, see docs/NOTES.md, and were removed.)
+constexpr int P_LEVELS = 1;
 constexpr int P_CHUNK = 8;  // groups prefetched at a time
 struct PDir {
   u64 key;       // 0 marks an empty slot
@@ -129,11 +130,11 @@ struct Snapshot {
 std::string table_dir();
 
 // Loads the tables, building any that are missing (and writing them to table_dir()): the
-// two-card table (always, in memory), the three-card table and pattern levels
-// 0 .. pattern_levels - 1 (4-card patterns, then 5, then 6). `dir` may be null (see
+// two-card table (always, in memory), the three-card table and, if pattern_levels >= 1,
+// the 4-card pattern table. `dir` may be null (see
 // table_dir()). Building the three-card table takes about a minute on many threads; the
-// pattern tables are filled for up to DDCLAIM_SECONDS (170 by default). Call once, from one
-// thread, before any probe. ddclaim::init() is init_tables(nullptr, $DDCLAIM_LEVELS or 2).
+// pattern table is filled for up to DDCLAIM_SECONDS (170 by default). Call once, from one
+// thread, before any probe.
 void init_tables(const char* dir, int pattern_levels);
 
 // Copies the state of the tables loaded by init_tables() (about 17 KB; the tables themselves

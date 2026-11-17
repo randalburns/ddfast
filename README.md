@@ -14,7 +14,7 @@ run: positions are 64-bit hand words handled with bit operations and AVX-512 (NE
 the move ordering work on those words without DDS's per-node bookkeeping, the transposition
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
 guess, and the last 2, 3 and 4 cards of each hand are looked up in the precomputed tables of
-[ddclaim](https://github.com/randalburns/ddclaim). [docs/NOTES.md](docs/NOTES.md) is the
+ddclaim (`extern/ddclaim`, formerly [its own repository](https://github.com/randalburns/ddclaim)). [docs/NOTES.md](docs/NOTES.md) is the
 design and the full measurement history.
 
 ## Design explainers
@@ -92,7 +92,7 @@ cd ddfast
 scripts/build.sh
 ```
 
-`scripts/build.sh` (and ddclaim's own `extern/ddclaim/scripts/build.sh`) sees `arm64` from
+`scripts/build.sh` sees `arm64` from
 `uname -m` and compiles with `-mcpu=native` in place of `-march=native`. Apple clang may know
 a newer CPU only by an older name (it treats an M5 as an M3), which leaves out the scalar
 popcount and count-trailing-zeros instructions (CSSC); the script adds them, as
@@ -121,9 +121,9 @@ echo 'N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85' | b
 
 The 2-card table is not a file: it is built in memory by every `init()`, in a moment.
 
-ddfast asks ddclaim for the 4-card pattern level only (`DDCLAIM_LEVELS` overrides it), so
-only the files above are built. A directory that already holds ddclaim's full tables, as ddclaim's own build makes them, works
-as it is: point `DDCLAIM_DIR` at it.) The pattern table is filled for a fixed time, so tables
+These are the only table files: ddclaim's 5- and 6-card pattern tables were removed (they
+saved 6% of nodes and no time). A directory that also holds the old `p5_v5` and `p6_v5` files
+works as it is; they are not read. The pattern table is filled for a fixed time, so tables
 built on different machines can differ in size; the answers are exact either way.
 
 ## The macOS port
@@ -249,7 +249,7 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/dds_port.hpp` | DDS's quick tricks, later tricks and move ordering, ported (used by the search) |
 | `src/api.cpp` | the interface and the thread pool |
 | `src/guess_*.inc` | fitted first guesses of the result |
-| `extern/ddclaim` | ddclaim (submodule): the endgame tables and their probes (`include/ddclaim/tables.hpp`) |
+| `extern/ddclaim` | ddclaim (git subtree): the endgame tables, their probes (`include/ddclaim/tables.hpp`) and builder |
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |

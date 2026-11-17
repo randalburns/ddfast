@@ -64,7 +64,7 @@ int g_sw = getenv("SW") ? atoi(getenv("SW")) : 15;
 #endif
 #ifdef STATS
 }
-unsigned long long g_plook[3], g_phit[3];
+unsigned long long g_plook[P_LEVELS], g_phit[P_LEVELS];
 namespace {
 u64 g_n[8][5], g_fn[8], g_nodes, g_leads, g_queries, g_tthit, g_qt, g_lt, g_ttlook, g_first[4], g_tried[4];
 struct StatPrinter {
@@ -73,7 +73,7 @@ struct StatPrinter {
             (unsigned long long)g_queries, (unsigned long long)g_nodes, double(g_nodes) / double(g_queries),
             (unsigned long long)g_leads, (unsigned long long)g_qt, (unsigned long long)g_lt,
             (unsigned long long)g_ttlook, (unsigned long long)g_tthit);
-    for (int i = 0; i < 3; i++) fprintf(stderr, "p%d: look %llu hit %llu\n", i + 4, g_plook[i], g_phit[i]);
+    for (int i = 0; i < P_LEVELS; i++) fprintf(stderr, "p%d: look %llu hit %llu\n", i + 4, g_plook[i], g_phit[i]);
     for (int n = 1; n < 8; n++)
       fprintf(stderr, "  n=%d: leads %llu qt %llu lt %llu tthit %llu expanded %llu follow-nodes %llu\n", n, (unsigned long long)g_n[n][0], (unsigned long long)g_n[n][1], (unsigned long long)g_n[n][2], (unsigned long long)g_n[n][3], (unsigned long long)g_n[n][4], (unsigned long long)g_fn[n]);
     for (int k = 0; k < 4; k++)
@@ -105,9 +105,6 @@ constexpr int TT_BITS = 10;
 #define TT_MIN_N 5
 #endif
 constexpr int TT_MIN = TT_MIN_N;
-#ifndef NCTX
-#define NCTX 8
-#endif
 thread_local Bucket g_tt[1 << TT_BITS];
 
 // The position being searched. Thread-local so that table building can use several threads.
@@ -127,7 +124,7 @@ void yield();
 thread_local std::vector<PRec>* g_plog;  // new patterns while filling (one vector per level)
 #ifdef STATS
 }
-extern unsigned long long g_plook[3], g_phit[3];
+extern unsigned long long g_plook[P_LEVELS], g_phit[P_LEVELS];
 namespace {
 #endif
 
@@ -1373,14 +1370,15 @@ void build_p(int levels) {
       return;
     }
   }
-  // Fill: rounds of random six-card endings solved against the table as it stands; the
+  // Fill: rounds of random six-card endings solved against the table as it stands (the
+  // search above 4 cards, with its own transposition table, only drives the fill); the
   // patterns they prove are merged in after each round. Stops at the ending count, the
   // file budget or the time budget.
   const long warm = env_long("DDCLAIM_WARM", 200000000);
   const long round_max = env_long("DDCLAIM_ROUND", 3000000);
   const double max_seconds = double(env_long("DDCLAIM_SECONDS", 170));
   const size_t max_bytes = size_t(env_long("DDCLAIM_MB", 3400)) << 20;
-  const size_t caps[P_LEVELS] = {size_t(env_long("DDCLAIM_CAP4", 256)), size_t(env_long("DDCLAIM_CAP5", 64)), size_t(env_long("DDCLAIM_CAP6", 64))};
+  const size_t caps[P_LEVELS] = {size_t(env_long("DDCLAIM_CAP4", 256))};
   const double t_start = now_seconds();
   mkdir("build", 0777);
   make_table_dir();
@@ -1487,21 +1485,6 @@ void init_tables(const char* dir, int pattern_levels) {
 
 }  // namespace tables
 
-void init() { init(nullptr); }
-
-void init(const char* dir) {
-  tables::init_tables(dir, int(env_long("DDCLAIM_LEVELS", 2)));
-#ifdef STATS
-  g_nodes = g_leads = g_queries = g_tthit = g_qt = g_lt = g_ttlook = 0;
-  memset(g_plook, 0, sizeof g_plook), memset(g_phit, 0, sizeof g_phit);
-  memset(g_n, 0, sizeof g_n), memset(g_fn, 0, sizeof g_fn), memset(g_first, 0, sizeof g_first), memset(g_tried, 0, sizeof g_tried);
-#endif
-}
-
 bool pin_thread(int cpu) { return ddport::pin_to_cpu(cpu); }
-
-void solve(const Position* positions, size_t count, uint8_t* tricks) {
-  run_batch(positions, count, tricks, NCTX);
-}
 
 }  // namespace ddclaim

@@ -75,7 +75,7 @@ int g_sw = getenv("SW") ? atoi(getenv("SW")) : 15;
 #ifdef STATS
 }
 int g_why; unsigned long long g_whyc[8][8], g_whyw[8][8], g_whyn[8];
-unsigned long long g_plook[3], g_phit[3], g_etc[2][16], g_etch[2][16], g_etcn[2][16];
+unsigned long long g_plook[P_LEVELS], g_phit[P_LEVELS], g_etc[2][16], g_etch[2][16], g_etcn[2][16];
 int g_rootL;
 unsigned long long g_cnS[2][16], g_c1S[2][16], g_wS[2][16], g_allS[2][16], g_allN[2][16];
 namespace {
@@ -86,7 +86,7 @@ struct StatPrinter {
             (unsigned long long)g_queries, (unsigned long long)g_nodes, double(g_nodes) / double(g_queries),
             (unsigned long long)g_leads, (unsigned long long)g_qt, (unsigned long long)g_lt,
             (unsigned long long)g_ttlook, (unsigned long long)g_tthit);
-    for (int i = 0; i < 3; i++) fprintf(stderr, "p%d: look %llu hit %llu\n", i + 4, g_plook[i], g_phit[i]);
+    for (int i = 0; i < P_LEVELS; i++) fprintf(stderr, "p%d: look %llu hit %llu\n", i + 4, g_plook[i], g_phit[i]);
     for (int n = 4; n < 14; n++) fprintf(stderr, "  n=%d: new entries %llu, blocks scanned %llu, blocks on hits %llu, misses %llu (no bound decides %llu, no slot %llu)\n", n, (unsigned long long)g_store[n], (unsigned long long)g_blk[n], (unsigned long long)g_blkhit[n], (unsigned long long)g_tmiss[n], (unsigned long long)g_evict[n], (unsigned long long)g_tnoslot[n]);
     for (int n = 1; n < 14; n++)
       fprintf(stderr, "  n=%d: leads %llu qt %llu lt %llu tthit %llu expanded %llu follow-nodes %llu\n", n, (unsigned long long)g_n[n][0], (unsigned long long)g_n[n][1], (unsigned long long)g_n[n][2], (unsigned long long)g_n[n][3], (unsigned long long)g_n[n][4], (unsigned long long)g_fn[n]);
@@ -1666,7 +1666,7 @@ void yield();
 
 #ifdef STATS
 }
-extern unsigned long long g_plook[3], g_phit[3];
+extern unsigned long long g_plook[P_LEVELS], g_phit[P_LEVELS];
 extern int g_rootL;
 extern unsigned long long g_cnS[2][16], g_c1S[2][16], g_wS[2][16], g_allS[2][16], g_allN[2][16];
 namespace {
@@ -3772,7 +3772,6 @@ void init(const char* dir) {
   ddclaim::tables::init_tables(dir, lv && *lv ? atoi(lv) : P_USE_LEVELS);
   ddclaim::tables::attach();  // this file's copy of the table state (see ddclaim/tables.hpp)
   if (getenv("LEAN_NOP4")) g_pt[0].use = false;
-  if (getenv("LEAN_NOP5")) g_pt[1].use = false;
   if (getenv("LEAN_NOT3")) g_use3 = false;
 #ifdef STATS
   g_nodes = g_leads = g_queries = g_tthit = g_qt = g_lt = g_ttlook = 0;
