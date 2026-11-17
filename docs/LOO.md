@@ -143,9 +143,14 @@ All answers were correct. With the searches within 5% of each other:
 - An earlier run that also turned off the relevant-card skip searched 2.3× DDS's nodes. That
   run measured the missing skip, not the representation.
 
-Still mixed in with the representation: the fixed trump lane (no switch yet), the
-differences between the two transposition tables, and ddfast's compile-time specialisation for
-no-trumps against trumps.
+The fixed trump lane is counted as part of the representation, deliberately. A design that
+puts a whole hand in one word puts trumps in a fixed lane: that's what gives it constant trump
+masks and the tables their canonical layout. A variant with trumps left in their own suits
+would be invasive and is not a design anyone would build, so it wasn't measured.
+
+Still mixed in with the representation: the differences between the two transposition tables,
+and ddfast's compile-time specialisation for no-trumps against trumps (DDS also has separate
+trump and no-trump weight functions).
 
 ## Caveats
 
@@ -155,7 +160,8 @@ no-trumps against trumps.
 - **The leave-one-out table doesn't measure the representation as a whole.** It changes the
   instructions ddfast uses on its hand words, not the hand words themselves. For the whole
   representation, see the comparison with DDS's search above.
-- **Trump placement** (trumps always in lane 3) has no switch yet and isn't covered.
+- **Trump placement** (trumps always in lane 3) has no switch of its own. It's part of the
+  representation; see the comparison with DDS's search.
 - **Not covered:** parallel solving (`solve_parallel`, `solve_deal_parallel`) and interleaved
   searches (`NCTX`, already off in ddfast).
 - An earlier run in normal power mode gave the same order of features, with factors within
