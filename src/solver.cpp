@@ -1811,7 +1811,7 @@ inline bool later_tricks(int L, int need, u64 all, u64& R) {
 #ifdef PROF
 #define PROF_NI __attribute__((noinline))
 #else
-#define PROF_NI inline
+#define PROF_NI [[gnu::always_inline]] inline
 #endif
 // Looks the position up in the per-deal table: 1 or 0 if a pattern decides the question
 // (R gets its cards), else -1. hint gets the best card recorded for the key, if any.
