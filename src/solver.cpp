@@ -1594,11 +1594,12 @@ inline u64 pick_best(const u64* cards, const uint16_t* key, u64 cand) {
 
 // The endgame tables (two- and three-card tables, pattern tables) are ddclaim's: see
 // ddclaim/tables.hpp.
-#if NCTX == 1
-#define yield() ((void)0)
-#else
-void yield();
-#endif
+// Interleaved searches (solve_positions on small positions, ddclaim's mini-stacks): a probe
+// of a table in memory prefetches its entry and hands over to the next search. Outside such
+// a batch yield() is one test of a flag.
+thread_local bool g_inter = false;
+void yield_switch();
+#define yield() (g_inter ? yield_switch() : (void)0)
 
 #ifdef STATS
 }
@@ -2890,7 +2891,7 @@ int solve_one(int n, int L, int first) {
 #endif
   S->rootL = L;
 #ifdef MEMN
-  memset(S->mres, 0, sizeof S->mres);
+  if (n >= MEMN) memset(S->mres, 0, sizeof S->mres);  // read only for leads of MEMN cards
 #endif
   while (lo < hi) {
     STAT(nq++);
@@ -2918,6 +2919,21 @@ int solve_one(int n, int L, int first) {
 }
 
 // ---------------------------------------------------------------------------------------
+// One question: do North-South take at least t of the n tricks (1 <= t <= n)? As solve_one,
+// for a single target.
+template <bool NT>
+bool ask_one(int n, int L, int t) {
+  ensure_state();
+  S->rootL = L;
+#ifdef MEMN
+  if (n >= MEMN) memset(S->mres, 0, sizeof S->mres);
+#endif
+  u64 R;
+  STAT(g_queries++);
+  return lead<NT>(n, L, t, R);
+}
+
+// ---------------------------------------------------------------------------------------
 // Coroutines: several positions are searched in turn on one thread. A search that needs a
 // three-card table entry prefetches it and hands over to the next search, so the memory
 // access is over by the time it resumes.
@@ -2935,6 +2951,7 @@ struct Ctx {
   u64 h[4];
   u64 lens;
   uint32_t gen;
+  u64 mnodes;  // lead memory's node count (MEMCOST), per search
   int next, prev;
   SState* ss;
 };
@@ -2952,17 +2969,18 @@ inline void save_state(Ctx& c) {
   c.h[0] = H[0], c.h[1] = H[1], c.h[2] = H[2], c.h[3] = H[3];
   c.lens = LENS;
   c.gen = g_gen;
+  c.mnodes = g_mnodes;
 }
 inline void load_state(const Ctx& c) {
   H[0] = c.h[0], H[1] = c.h[1], H[2] = c.h[2], H[3] = c.h[3];
   LENS = c.lens;
   g_gen = c.gen;
+  g_mnodes = c.mnodes;
   S = c.ss;
 }
 
-#undef yield
-__attribute__((noinline)) void yield() {
-  if (NCTX == 1 || g_cur < 0) return;
+__attribute__((noinline)) void yield_switch() {
+  if (g_cur < 0) return;
   Ctx& a = g_ctx[g_cur];
   if (a.next == g_cur) return;
   save_state(a);
@@ -2974,7 +2992,8 @@ __attribute__((noinline)) void yield() {
 
 // keep: the previous call was the same deal and strain, so its table still holds (its entries
 // are valid for any leader); a full table solves the four declarers of a strain this way.
-inline int solve_position(const ddclaim::Position& p, int first = 0, bool keep = false) {
+// ask > 0: answer only "do North-South take at least ask tricks?" (1 or 0; 1 <= ask <= n).
+inline int solve_position(const ddclaim::Position& p, int first = 0, bool keep = false, int ask = 0) {
   ensure_state();
   const int tr = p.trump;
   u64 lens = 0;
@@ -2994,8 +3013,8 @@ inline int solve_position(const ddclaim::Position& p, int first = 0, bool keep =
   if (!keep) {
     g_gen = ++g_gen_counter;
     S->tt.reset();
-    memset(S->htried, 0, sizeof S->htried), memset(S->hcut, 0, sizeof S->hcut);
   }
+  if (ask > 0) return tr == 4 ? int(ask_one<true>(n, p.leader, ask)) : int(ask_one<false>(n, p.leader, ask));
   return tr == 4 ? solve_one<true>(n, p.leader, first) : solve_one<false>(n, p.leader, first);
 }
 
@@ -3036,9 +3055,14 @@ void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks
     if (!c.ss->tt.dir) c.ss->tt.alloc();
     save_state(c);
   }
+  SState* const s0 = S;
+  const u64 m0 = g_mnodes;
+  g_inter = nctx > 1;
   g_cur = 0;
   S = g_ctx[0].ss;
   ddfast_ctx_switch(&g_main_sp, g_ctx[0].sp);
+  g_inter = false;
+  S = s0, g_mnodes = m0;
 }
 
 }  // namespace
@@ -3069,10 +3093,22 @@ void solve(const Position* positions, size_t count, uint8_t* tricks) {
   run_batch(positions, count, tricks, NCTX);
 }
 
+// North-South's tricks for each position, nctx searches interleaved on this thread.
+void solve_positions(const Position* positions, size_t count, uint8_t* tricks, int nctx) {
+  ensure_state();
+  run_batch(positions, count, tricks, nctx);
+}
+
 int solve_position(const Position& p, bool keep) {
   ensure_state();
   if (!S->tt.dir) S->tt.alloc();  // as in solve_table
   return ::solve_position(p, 0, keep);
+}
+
+bool query_position(const Position& p, int target, bool keep) {
+  ensure_state();
+  if (!S->tt.dir) S->tt.alloc();
+  return ::solve_position(p, 0, keep, target) != 0;
 }
 
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) {

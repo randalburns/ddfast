@@ -61,18 +61,19 @@ DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
 # The library: ddclaim (the tables, compiled without XFLAGS) and ddfast.
-rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o"
+rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
 # shellcheck disable=SC2086
 {
   $CXX $BASE -Iextern/ddclaim/include -c extern/ddclaim/src/ddclaim.cpp -o "$OUT/obj/ddclaim.o" &
   $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
   $CXX $BASE $XFLAGS $INC -Isrc -c src/par_deal.cpp -o "$OUT/obj/par_deal.o" &
   $CXX $BASE $XFLAGS $INC -c src/api.cpp -o "$OUT/obj/api.o" &
+  $CXX $BASE $XFLAGS $INC -c src/play.cpp -o "$OUT/obj/play.o" &
   wait
 }
-[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ]
+[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
 rm -f "$OUT/libddfast.a"
-ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/ddclaim.o"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/ddclaim.o"
 # shellcheck disable=SC2086
 $CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
 [ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }
@@ -86,14 +87,16 @@ rm -f "$OUT/libdds.a"
 ar rcs "$OUT/libdds.a" "$OUT"/dds/*.o
 
 # Tests and benchmarks.
-for b in test_ddfast make_ref bench_solve bench_tables; do rm -f "$OUT/$b"; done
+for b in test_ddfast test_play make_ref bench_solve bench_tables bench_positions; do rm -f "$OUT/$b"; done
 # shellcheck disable=SC2086
 {
   $CXX $BASE $INC $DDSINC -Itests tests/test_ddfast.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/test_ddfast" &
+  $CXX $BASE $INC $DDSINC tests/test_play.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/test_play" &
   $CXX $BASE $INC $DDSINC -Itests tests/make_ref.cpp "$OUT/libdds.a" -pthread -o "$OUT/make_ref" &
   $CXX $BASE $INC $DDSINC -Itests bench/bench_solve.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_solve" &
   $CXX $BASE $INC $DDSINC -Itests bench/bench_tables.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_tables" &
+  $CXX $BASE $INC $DDSINC bench/bench_positions.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_positions" &
   wait
 }
-for b in test_ddfast make_ref bench_solve bench_tables; do [ -x "$OUT/$b" ] || { echo "build.sh: $b failed" >&2; exit 1; }; done
+for b in test_ddfast test_play make_ref bench_solve bench_tables bench_positions; do [ -x "$OUT/$b" ] || { echo "build.sh: $b failed" >&2; exit 1; }; done
 echo "build.sh: done"
