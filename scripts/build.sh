@@ -9,8 +9,9 @@
 #   bin/libdds.a         DDS (extern/dds), for the tests and benchmarks only
 #
 # Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native) on Linux, or Apple silicon on
-# macOS (-mcpu=native; NEON in place of AVX-512, see extern/ddclaim/include/ddclaim/port.hpp),
-# and the submodules
+# macOS (-mcpu=native) with Google Highway's headers (brew install highway; Highway in place
+# of AVX-512, see extern/ddclaim/include/ddclaim/port.hpp; HWY_INC overrides where they are
+# found), and the submodules
 # (git clone --recursive, or git submodule update --init). Uses clang++ if present, else g++;
 # set CXX to choose. Environment:
 #   XFLAGS="..."  more flags for ddfast's own sources, e.g. -DSTATS (prints search counters,
@@ -52,7 +53,18 @@ case "$(uname -m)" in
     ARCH="-mcpu=native"
     # Apple clang may know the CPU only as an older one (an M5 as apple-m3); add the scalar
     # popcount and count-trailing-zeros instructions (CSSC) when the CPU has them.
-    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc" ;;
+    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc"
+    # Google Highway (headers only): $HWY_INC, else Homebrew's prefix, else the system's.
+    if [ -z "${HWY_INC:-}" ]; then
+      for d in "$(brew --prefix 2>/dev/null)/include" /opt/homebrew/include /usr/local/include /usr/include; do
+        [ -f "$d/hwy/highway.h" ] && { HWY_INC=$d; break; }
+      done
+    fi
+    if [ -z "${HWY_INC:-}" ] || [ ! -f "$HWY_INC/hwy/highway.h" ]; then
+      echo "build.sh: Google Highway not found; brew install highway (or set HWY_INC)" >&2
+      exit 1
+    fi
+    ARCH="$ARCH -I$HWY_INC" ;;
   *) ARCH="-march=native" ;;
 esac
 BASE="-std=c++20 -O3 -DNDEBUG $ARCH"

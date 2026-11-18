@@ -1,6 +1,7 @@
-// Portability layer: the bit and vector operations ddclaim (and ddfast) use, for x86-64 (BMI2
-// and AVX-512, the original instructions) and for AArch64 (Apple silicon: NEON, and table
-// lookups or bit tricks in place of pext/pdep, which Arm lacks).
+// Portability layer: the bit and vector operations ddclaim (and ddfast) use, in two
+// implementations: x86-64 (BMI2 and AVX-512 intrinsics, the original instructions) and AArch64
+// (Apple silicon: the vector code written with Google Highway, static dispatch on 128-bit
+// vectors, and table lookups or bit tricks in place of pext/pdep, which Arm lacks).
 #pragma once
 
 #include <bit>
@@ -11,7 +12,7 @@
 #define DDCLAIM_X86 1
 #define DDCLAIM_ARM 0
 #elif defined(__aarch64__)
-#include <arm_neon.h>
+#include <hwy/highway.h>
 #define DDCLAIM_X86 0
 #define DDCLAIM_ARM 1
 #else
@@ -21,6 +22,9 @@
 namespace ddport {
 
 typedef uint64_t u64;
+#if DDCLAIM_ARM
+namespace hn = hwy::HWY_NAMESPACE;
+#endif
 
 inline int clz64(u64 x) { return std::countl_zero(x); }  // 64 for 0, like lzcnt
 inline int ctz64(u64 x) { return std::countr_zero(x); }  // 64 for 0, like tzcnt
@@ -72,7 +76,7 @@ struct BitMask {
 
 // pext/pdep a byte at a time through 256 x 256 tables (64 KB each, so both stay in a
 // performance core's 128 KB L1). The eight bytes are independent: each one's output offset
-// is a prefix sum of the mask's byte popcounts, found with one NEON cnt and a multiply.
+// is a prefix sum of the mask's byte popcounts, found with one vector popcount and a multiply.
 struct ByteTables {
   uint8_t ext[256][256];  // [mask][x] -> x's bits under mask, packed low
   uint8_t dep[256][256];  // [mask][v] -> the low bits of v spread over mask
@@ -96,7 +100,9 @@ inline const ByteTables g_bytes;
 // Byte k: the number of mask bits in bytes 0 .. k-1.
 __attribute__((always_inline)) inline u64 byte_offsets(u64 m) {
 #if DDCLAIM_ARM
-  const u64 c = vget_lane_u64(vreinterpret_u64_u8(vcnt_u8(vcreate_u8(m))), 0);
+  const hn::Full64<uint8_t> d8;
+  const hn::Full64<uint64_t> d64;
+  const u64 c = hn::GetLane(hn::BitCast(d64, hn::PopulationCount(hn::BitCast(d8, hn::Set(d64, m)))));
 #else  // the popcount of each byte, by halves (x86 with ABL_SOFT_BITS)
   u64 c = m - ((m >> 1) & 0x5555555555555555ull);
   c = (c & 0x3333333333333333ull) + ((c >> 2) & 0x3333333333333333ull);
@@ -203,58 +209,62 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
 #endif
 }
 
-#else  // DDCLAIM_ARM
+#else  // DDCLAIM_ARM: Highway
 
 inline u64 shuf8(u64 x, const uint8_t* ctl) {
-  return vget_lane_u64(vreinterpret_u64_u8(vtbl1_u8(vcreate_u8(x), vld1_u8(ctl))), 0);
+  const hn::Full64<uint8_t> d8;
+  const hn::Full64<uint64_t> d64;
+  return hn::GetLane(hn::BitCast(d64, hn::TableLookupBytesOr0(hn::BitCast(d8, hn::Set(d64, x)), hn::Load(d8, ctl))));
 }
 
-// NEON: two 64-bit lanes at a time; the masks come out as one bit per lane.
-inline unsigned mask2(uint64x2_t v) {  // v lanes all-ones or zero
-  return unsigned(vgetq_lane_u64(v, 0) & 1) | unsigned(vgetq_lane_u64(v, 1) & 2);
+// Two 64-bit lanes a vector; four lane masks narrow to one 16-bit lane mask of 8 lanes. The
+// masks narrow as vectors by truncation
+// (one uzp1 each on Arm; OrderedDemote2MasksTo
+// narrows with saturation, two dependent instructions each, about 1% slower overall).
+using D64 = hn::Full128<uint64_t>;
+using M64 = hn::Mask<D64>;
+__attribute__((always_inline)) inline hn::Vec<hn::Full128<uint16_t>> narrow8(M64 a, M64 b, M64 c, M64 d) {
+  const D64 d64;
+  const hn::Full128<uint32_t> d32;
+  const hn::Full128<uint16_t> d16;
+  return hn::OrderedTruncate2To(d16, hn::OrderedTruncate2To(d32, hn::VecFromMask(d64, a), hn::VecFromMask(d64, b)),
+                                hn::OrderedTruncate2To(d32, hn::VecFromMask(d64, c), hn::VecFromMask(d64, d)));
 }
-inline unsigned movemask8x64(uint64x2_t a, uint64x2_t b, uint64x2_t c, uint64x2_t d) {
-  // Narrow 8 lanes of all-ones/zero to bytes and pick one bit per byte.
-  const uint32x4_t ab = vcombine_u32(vmovn_u64(a), vmovn_u64(b));
-  const uint32x4_t cd = vcombine_u32(vmovn_u64(c), vmovn_u64(d));
-  const uint8x8_t n = vmovn_u16(vcombine_u16(vmovn_u32(ab), vmovn_u32(cd)));
-  const uint8x8_t bitv = vcreate_u8(0x8040201008040201ull);
-  return vaddv_u8(vand_u8(n, bitv));
+// The eight lanes as bits 0..7 (narrowed once more, to bytes).
+__attribute__((always_inline)) inline unsigned movemask8x64(M64 a, M64 b, M64 c, M64 d) {
+  const hn::Full64<uint8_t> d8;
+  return unsigned(hn::BitsFromMask(d8, hn::MaskFromVec(hn::TruncateTo(d8, narrow8(a, b, c, d)))));
 }
 
 inline unsigned match8(const u64* mask, const u64* val, u64 own) {
-  const uint64x2_t vo = vdupq_n_u64(own);
-  uint64x2_t r[4];
-  for (int i = 0; i < 4; i++) r[i] = vceqq_u64(vandq_u64(vld1q_u64(mask + 2 * i), vo), vld1q_u64(val + 2 * i));
-  return movemask8x64(r[0], r[1], r[2], r[3]);
+  const D64 d;
+  const auto vo = hn::Set(d, own);
+  auto m = [&](int i) { return hn::Eq(hn::And(hn::Load(d, mask + 2 * i), vo), hn::Load(d, val + 2 * i)); };
+  return movemask8x64(m(0), m(1), m(2), m(3));
 }
 
 inline unsigned pmatch8(const u64* a, const u64* b, u64 own, int tl) {
-  const uint64x2_t vo = vdupq_n_u64(own), vt = vdupq_n_u64(u64(tl)), seven = vdupq_n_u64(7);
-  uint64x2_t r[4];
-  for (int i = 0; i < 4; i++) {
-    const uint64x2_t vb = vld1q_u64(b + 2 * i);
-    const uint64x2_t k = vceqq_u64(vandq_u64(vb, vo), vld1q_u64(a + 2 * i));
-    const uint64x2_t lo = vandq_u64(vshrq_n_u64(vb, 56), seven), hi = vandq_u64(vshrq_n_u64(vb, 59), seven);
-    r[i] = vandq_u64(k, vorrq_u64(vcgeq_u64(lo, vt), vcltq_u64(hi, vt)));
-  }
-  return movemask8x64(r[0], r[1], r[2], r[3]);
+  const D64 d;
+  const auto vo = hn::Set(d, own), vt = hn::Set(d, u64(tl)), seven = hn::Set(d, u64(7));
+  auto m = [&](int i) {
+    const auto vb = hn::Load(d, b + 2 * i);
+    const auto k = hn::Eq(hn::And(vb, vo), hn::Load(d, a + 2 * i));
+    const auto lo = hn::And(hn::ShiftRight<56>(vb), seven), hi = hn::And(hn::ShiftRight<59>(vb), seven);
+    return hn::And(k, hn::Or(hn::Ge(lo, vt), hn::Lt(hi, vt)));
+  };
+  return movemask8x64(m(0), m(1), m(2), m(3));
 }
 
 inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
-  const uint64x2_t vc = vdupq_n_u64(cand);
-  uint16x8_t best = vdupq_n_u16(0);
-  for (int h = 0; h < 16; h += 8) {
-    // 0xFFFF in lane i where cards[h + i] & cand is nonzero.
-    const uint32x4_t t0 = vcombine_u32(vmovn_u64(vtstq_u64(vld1q_u64(cards + h), vc)),
-                                       vmovn_u64(vtstq_u64(vld1q_u64(cards + h + 2), vc)));
-    const uint32x4_t t1 = vcombine_u32(vmovn_u64(vtstq_u64(vld1q_u64(cards + h + 4), vc)),
-                                       vmovn_u64(vtstq_u64(vld1q_u64(cards + h + 6), vc)));
-    const uint16x8_t live = vcombine_u16(vmovn_u32(t0), vmovn_u32(t1));
-    best = vmaxq_u16(best, vandq_u16(live, vld1q_u16(key + h)));
-  }
-  return vmaxvq_u16(best);
+  const D64 d;
+  const hn::Full128<uint16_t> d16;
+  const auto vc = hn::Set(d, cand), z = hn::Zero(d);
+  auto live = [&](int i) { return hn::Ne(hn::And(hn::Load(d, cards + 2 * i), vc), z); };
+  const auto k0 = hn::And(narrow8(live(0), live(1), live(2), live(3)), hn::Load(d16, key));
+  const auto k1 = hn::And(narrow8(live(4), live(5), live(6), live(7)), hn::Load(d16, key + 8));
+  return hn::ReduceMax(d16, hn::Max(k0, k1));
 }
+
 #endif
 
 // Hand-word run helpers. A hand word has suit s in bits 16s .. 16s+12 and a guard bit at

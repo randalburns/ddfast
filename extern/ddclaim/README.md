@@ -9,8 +9,8 @@ from its `main` at 2a4f416 (the history is kept), and then cut down to what ddfa
 
 - `include/ddclaim/tables.hpp`: hand-word helpers, the layout of the 2-card table, the 3-card
   table and the 4-card pattern table, and the inline probes ddfast's search calls.
-- `include/ddclaim/port.hpp`: the AVX-512/BMI2 primitives and their NEON versions (Apple
-  silicon), used by ddclaim and ddfast.
+- `include/ddclaim/port.hpp`: the AVX-512/BMI2 primitives and their Google Highway versions
+  (Apple silicon), used by ddclaim and ddfast.
 - `include/ddclaim.hpp`: the position type and thread pinning.
 - `src/ddclaim.cpp`: the table data, loading and building. ddclaim's own search is kept only
   to build the tables: the 3-card table solves every 3-card ending, and the 4-card pattern
