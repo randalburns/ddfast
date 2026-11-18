@@ -381,4 +381,8 @@ inline void* init_stack(void* top, void (*entry)()) {
 // Thread placement. Linux pins to a CPU; macOS cannot pin, so it asks for the performance
 // cores through the thread's QoS class instead (returns false: not pinned).
 bool pin_to_cpu(int cpu);
+// A pool worker's placement for its CPU `cpu` of the pool's list cpus[0..ncpu): by default
+// confined to the CPUs of the list in the same NUMA node and core class (see tables.cpp,
+// DDFAST_AFFINITY). Returns true if the placement took effect.
+bool place_thread(int cpu, const int* cpus, int ncpu);
 }  // namespace ddport

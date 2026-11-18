@@ -48,6 +48,106 @@ bool pin_to_cpu(int cpu) {
   return false;
 #endif
 }
+
+#if defined(__linux__)
+namespace {
+// "0-3,12-15" -> the CPUs in it.
+std::vector<int> parse_cpulist(const char* s) {
+  std::vector<int> v;
+  while (*s) {
+    char* e;
+    const long a = strtol(s, &e, 10);
+    if (e == s) break;
+    long b = a;
+    s = e;
+    if (*s == '-') b = strtol(s + 1, &e, 10), s = e;
+    for (long c = a; c <= b && c < CPU_SETSIZE; c++) v.push_back(int(c));
+    if (*s == ',') s++;
+    else if (*s) break;
+  }
+  return v;
+}
+bool read_line(const char* path, char* buf, size_t n) {
+  FILE* f = fopen(path, "r");
+  if (!f) return false;
+  const bool ok = fgets(buf, int(n), f) != nullptr;
+  fclose(f);
+  return ok;
+}
+// Each CPU's group: its NUMA node and its core class (performance or efficiency), so a worker
+// can be confined to the CPUs that are interchangeable with its own. The core class is the
+// kernel's own split on Intel hybrid CPUs (/sys/devices/cpu_core, cpu_atom); elsewhere a CPU
+// whose maximum frequency is below 80% of the fastest one's counts as an efficiency core
+// (AMD Zen 5c next to Zen 5, Arm big.LITTLE). Without either, all CPUs are one class.
+struct Topology {
+  std::vector<int> group;  // by CPU number; -1: unknown
+  Topology() : group(CPU_SETSIZE, -1) {
+    std::vector<int> node(CPU_SETSIZE, 0), eff(CPU_SETSIZE, 0);
+    char buf[4096], path[128];
+    for (int n = 0; n < 1024; n++) {
+      snprintf(path, sizeof path, "/sys/devices/system/node/node%d/cpulist", n);
+      if (!read_line(path, buf, sizeof buf)) continue;
+      for (int c : parse_cpulist(buf)) node[c] = n;
+    }
+    if (read_line("/sys/devices/cpu_atom/cpus", buf, sizeof buf)) {
+      for (int c : parse_cpulist(buf)) eff[c] = 1;
+    } else {
+      std::vector<long> mhz(CPU_SETSIZE, 0);
+      long top = 0;
+      for (int c = 0; c < CPU_SETSIZE; c++) {
+        snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", c);
+        if (read_line(path, buf, sizeof buf)) mhz[c] = atol(buf), top = std::max(top, mhz[c]);
+      }
+      for (int c = 0; c < CPU_SETSIZE; c++) eff[c] = mhz[c] > 0 && mhz[c] * 5 < top * 4;
+    }
+    for (int c = 0; c < CPU_SETSIZE; c++) group[c] = 2 * node[c] + eff[c];
+  }
+};
+const Topology& topology() {
+  static const Topology t;
+  return t;
+}
+// DDFAST_AFFINITY: "group" (default) confines a worker to the CPUs of the list that share its
+// CPU's NUMA node and core class, and lets the scheduler move it among them; "cpu" pins it to
+// its own CPU (the old behaviour, steadiest for benchmarks on an idle machine, but a pinned
+// worker cannot escape a CPU shared with other work); "none" leaves placement to the scheduler.
+enum class Affinity { Group, Cpu, None };
+Affinity affinity_mode() {
+  static const Affinity a = [] {
+    const char* e = getenv("DDFAST_AFFINITY");
+    if (!e || !*e || !strcmp(e, "group")) return Affinity::Group;
+    if (!strcmp(e, "cpu")) return Affinity::Cpu;
+    if (!strcmp(e, "none")) return Affinity::None;
+    fprintf(stderr, "ddfast: DDFAST_AFFINITY=%s not understood (group, cpu or none); using group\n", e);
+    return Affinity::Group;
+  }();
+  return a;
+}
+}  // namespace
+#endif
+
+bool place_thread(int cpu, const int* cpus, int ncpu) {
+#if defined(__linux__)
+  if (cpu < 0 || cpu >= CPU_SETSIZE) return false;
+  switch (affinity_mode()) {
+    case Affinity::None: return false;
+    case Affinity::Cpu: return pin_to_cpu(cpu);
+    case Affinity::Group: break;
+  }
+  const Topology& t = topology();
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  for (int i = 0; i < ncpu; i++) {
+    const int c = cpus[i];
+    if (c >= 0 && c < CPU_SETSIZE && t.group[c] == t.group[cpu]) CPU_SET(c, &set);
+  }
+  CPU_SET(cpu, &set);
+  return pthread_setaffinity_np(pthread_self(), sizeof set, &set) == 0;
+#else
+  (void)cpus, (void)ncpu;
+  return pin_to_cpu(cpu);
+#endif
+}
 }  // namespace ddport
 
 namespace {
@@ -1490,5 +1590,6 @@ void init_tables(const char* dir, int pattern_levels) {
 }  // namespace tables
 
 bool pin_thread(int cpu) { return ddport::pin_to_cpu(cpu); }
+bool place_thread(int cpu, const int* cpus, int ncpu) { return ddport::place_thread(cpu, cpus, ncpu); }
 
 }  // namespace ddcore

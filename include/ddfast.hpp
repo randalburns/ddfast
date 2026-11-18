@@ -165,9 +165,12 @@ enum class BatchOrder { Given, Predicted };
 // SMT siblings (if smt): a reasonable cpu list for the parallel calls.
 std::vector<int> available_cpus(bool smt = true);
 
-// Like solve(), on a pool of worker threads, one per entry of cpus[0..ncpu), each pinned to
-// that CPU (-1: not pinned). Work is handed out one problem at a time. The pool is kept between
-// calls while the CPU list stays the same. Not reentrant (see above).
+// Like solve(), on a pool of worker threads, one per entry of cpus[0..ncpu) (-1: not placed).
+// Each worker may run on any CPU of the list in the same NUMA node and core class (performance
+// or efficiency) as its own entry, so the scheduler can move it away from a CPU shared with
+// other work; DDFAST_AFFINITY=cpu pins each worker to its own CPU instead (the old behaviour),
+// =none leaves placement to the scheduler. Work is handed out one problem at a time. The pool
+// is kept between calls while the CPU list stays the same. Not reentrant (see above).
 void solve_parallel(const Problem* problems, size_t n, uint8_t* tricks, const int* cpus, int ncpu,
                     BatchOrder order = BatchOrder::Predicted, std::vector<WorkerStats>* stats = nullptr);
 
@@ -176,10 +179,13 @@ void solve_tables_parallel(const Deal* deals, size_t n, Table* tables, const int
                            std::vector<WorkerStats>* stats = nullptr);
 
 // One problem searched on several cores at once, for lower latency on a single deal: the
-// calling thread and one helper thread on each of cpus[1..ncpu) (pinned) share the search of
-// each question by root leads (and by second hand's replies to the first lead). Pin the calling
+// calling thread and one helper thread for each of cpus[1..ncpu) (placed as for
+// solve_parallel) share the search of each question by root leads (and by second hand's
+// replies to the first lead). Pin the calling
 // thread to cpus[0] (pin_thread) for the best results. Returns declarer's tricks, exact like
-// solve(). Helpers spin for a few milliseconds after each question, then sleep. Not reentrant,
+// solve(). Helpers sleep between questions. Several of these calls (or other work) sharing the
+// same CPUs slow each other down far more than solve() would: prefer solve_parallel() for
+// batches, and solve_deal_parallel() only on otherwise idle cores (issue #4). Not reentrant,
 // and not to be overlapped with solve_parallel() on the same CPUs. lead_nodes, if given: the
 // lead nodes searched by all threads (compare stat_lead_nodes() for solve()).
 int solve_deal_parallel(const Problem& p, const int* cpus, int ncpu, unsigned long long* lead_nodes = nullptr);
