@@ -18,9 +18,9 @@ from DDS line by line and checked against it, `src/dds_port.hpp`). What changes 
 run: positions are 64-bit hand words handled with bit operations and AVX-512 (Google Highway on Apple silicon), the bounds and
 the move ordering work on those words without DDS's per-node bookkeeping, the transposition
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
-guess, and the last 2, 3 and 4 cards of each hand are looked up in the precomputed tables of
-ddclaim (`extern/ddclaim`, formerly [its own repository](https://github.com/randalburns/ddclaim)). [docs/NOTES.md](docs/NOTES.md) is the
-design and the full measurement history.
+guess, and the last 2, 3 and 4 cards of each hand are looked up in precomputed endgame tables
+(`extern/ddclaim`). [docs/NOTES.md](docs/NOTES.md) is the design and the full measurement
+history.
 
 ## Design explainers
 
@@ -70,7 +70,7 @@ the same CPUs with `taskset` but its threads are not pinned individually. A lapt
 a lot under load (3.0-4.2 GHz here), so the cycle counts are the steadier figure.
 
 Positions with fewer cards are faster still, relative to DDS (random trick starts, one at a
-time, `bench/positions_vs_ddclaim.sh`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
+time, `bench_positions`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
 at 7 and 58x at 5. Batches of small positions (`solve_positions`) gain another 1.2-1.5x.
 
 On one performance core of an Apple M5 (macOS; see "The macOS port" below), against
@@ -102,7 +102,7 @@ cd ddfast
 scripts/build.sh
 ```
 
-This makes, in `bin/`: `libddfast.a` (the library, ddclaim included), `ddfast` (the
+This makes, in `bin/`: `libddfast.a` (the library, endgame tables included), `ddfast` (the
 command), `test_ddfast`, `make_ref`, `bench_solve` and `bench_tables` (tests and benchmarks,
 linked with DDS from `extern/dds`, which is used for nothing else). Set `CXX` to choose the
 compiler; `LIBONLY=1` skips DDS, the tests and the benchmarks. See the comments in
@@ -136,7 +136,7 @@ too (from `proc_pid_rusage`); they are steadier than the time when other program
 
 ### The tables
 
-ddfast needs two of ddclaim's table files: the 3-card table (`t3_v2.bin`, 377 MB) and the
+ddfast needs two table files: the 3-card table (`t3_v2.bin`, 377 MB) and the
 4-card pattern table (`p4_v5.ent` and `.idx`, 758 MB). `init()` reads them from the directory
 it is given, else `$DDCLAIM_DIR`, else `build/ddclaim` under the current directory, and if
 they are missing builds them there first (once): about 10 seconds for the 3-card table (on 8 cores) and up
@@ -151,18 +151,16 @@ echo 'N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85' | b
 
 The 2-card table is not a file: it is built in memory by every `init()`, in a moment.
 
-These are the only table files: ddclaim's 5- and 6-card pattern tables were removed (they
-saved 6% of nodes and no time). A directory that also holds the old `p5_v5` and `p6_v5` files
-works as it is; they are not read. The pattern table is filled for a fixed time, so tables
-built on different machines can differ in size; the answers are exact either way.
+The pattern table is filled for a fixed time, so tables built on different machines can differ
+in size; the answers are exact either way.
 
 ## The macOS port
 
-ddfast and ddclaim were written for AVX-512 and BMI2. The port keeps that code as it was for
+ddfast was written for AVX-512 and BMI2. The port keeps that code as it was for
 x86-64 and adds an AArch64 version of each piece, chosen at compile time. There are two
 implementations of the vector code: AVX-512 intrinsics on x86-64 and Google Highway (static
 dispatch, 128-bit vectors) on AArch64; there is no hand-written NEON. The pieces live in
-one header, `extern/ddclaim/include/ddclaim/port.hpp`, used by both ddclaim and ddfast:
+one header, `extern/ddclaim/include/ddclaim/port.hpp`, used by the search and the endgame tables:
 
 - **pext and pdep**, which Arm lacks, are done a byte at a time through two 64 KB tables
   (they fit in a performance core's L1 cache). The eight bytes are independent: each byte's
@@ -203,8 +201,8 @@ about 40M on x86, mostly for pext and pdep and the narrower vectors. The M5 runs
 3.6 instructions per cycle, so ddfast takes about as many cycles per deal as on Zen 5 (15.5M
 against 16.1M). DDS gains far more from Apple's core: about 48M cycles per deal on the M5,
 against about 80M on Zen 5. That is why the ratio to DDS is about 3x on the Mac and 4x on
-Zen 5. Most of what remains is waiting for memory in the per-deal table and in ddclaim's 1.1 GB
-of tables (which on macOS cannot use huge pages; on Linux they are worth about 2%).
+Zen 5. Most of what remains is waiting for memory in the per-deal table and in the 1.1 GB
+of endgame tables (which on macOS cannot use huge pages; on Linux they are worth about 2%).
 Profile-guided optimisation saves about 7% of the instructions on the M5 but only about 2% of
 the cycles, so the build does not use it.
 
@@ -293,8 +291,7 @@ ddfast::par(t, dealer, vulnerable, pr);            // par score and contracts fr
 
 `solve_positions` searches positions of up to 10 cards a hand four at a time, interleaved on
 the calling thread: a search waiting for an endgame table hands over to the next. On random
-4-7-card positions that is 1.2-1.5x faster than one `solve_position` at a time, and from 7
-cards faster than ddclaim's own solver. In the middle of a trick the cards still to come are
+4-7-card positions that is 1.2-1.5x faster than one `solve_position` at a time. In the middle of a trick the cards still to come are
 searched card by card and each completed trick goes to the trick-start solver; kept simple,
 it still solves a deal after its opening lead in about 4 ms (DDS: 13 ms). Par is computed as
 the auction between two sides who know the table: from the dealer's side, each bids any higher
@@ -319,7 +316,6 @@ bin/bench_tables 200 4242                                  # tables against DDS 
 taskset -c 0-3 bin/bench_batch tests/data/public.set 120 4 0-3   # batches vs SolveAllBoards / CalcAllTables
 bin/test_play 1000 1             # play positions, card results, play analysis and par against DDS
 taskset -c 0 bin/bench_positions 6 20000 21 x.bin dds      # positions of 6 cards a hand vs DDS
-sh bench/positions_vs_ddclaim.sh OUTDIR                    # 3-13 cards vs DDS and ddclaim's solver
 sh bench/loo.sh OUTDIR                                     # the leave-one-out study (docs/LOO.md)
 ```
 
@@ -336,7 +332,7 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/api.cpp` | the interface and the thread pool |
 | `src/play.cpp` | play positions, card results, play analysis, targets and par |
 | `src/guess_*.inc` | fitted first guesses of the result |
-| `extern/ddclaim` | ddclaim (git subtree): the endgame tables, their probes (`include/ddclaim/tables.hpp`) and builder |
+| `extern/ddclaim` | the endgame tables: their probes (`include/ddclaim/tables.hpp`), the code that builds them, and the AVX-512 / Highway primitives (`include/ddclaim/port.hpp`) |
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
@@ -344,6 +340,6 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 
 ## License
 
-Apache License 2.0 (see LICENSE), as ddclaim and DDS. `src/dds_port.hpp` contains code taken
+Apache License 2.0 (see LICENSE), as is DDS. `src/dds_port.hpp` contains code taken
 from DDS (Copyright 2006-2014 Bo Haglund, 2014-2018 Bo Haglund and Soren Hein), marked in the
 file.
