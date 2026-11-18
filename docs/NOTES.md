@@ -1114,3 +1114,31 @@ every node count above also compared all answers with DDS; SELFTEST (-DSELFTEST=
 
 Next: the third-hand gaps are real but no simple feature separated them; FSNAP at 12-13 cards
 (slow) or a two-level oracle (which accounts for table reuse) may be needed.
+
+## Round 15 (perf-arena-nodes): node-reduction sweep, nothing kept
+
+Base perf-arena + verify. STATS nodes: public set 82,915,440; chunk1.set first 600 deals
+87,730,725. Cycles: alternating runs on CPU 2 (`bench_solve set`), 7 pairs. All variants gave
+all answers equal to DDS on both sets. The code of the switches below was not kept (the diff
+is small; each is a one-line condition).
+
+| Variant | Public nodes | chunk1[600] nodes | Cycles |
+|---|---:|---:|---|
+| HX=25 (table hint weight, default 50) | 83,249,566 (+0.40%) | 87,684,016 (-0.05%) | not timed |
+| HX=100 | 83,031,658 (+0.14%) | 88,397,726 (+0.76%) | not timed |
+| HX=200 | 83,181,350 (+0.32%) | 88,640,474 (+1.04%) | not timed |
+| Lead memory also for the opponents at 12 cards | 84,540,990 (+1.96%) | 89,353,701 (+1.85%) | not timed |
+| Follow, after the first card fails: hand 2 also highest (default only hand 3) | 84,253,740 (+1.61%) | 88,627,094 (+1.02%) | not timed |
+| hands 3 and 4 highest | 83,236,710 (+0.39%) | 88,116,548 (+0.44%) | not timed |
+| hands 2, 3, 4 highest | 84,555,457 (+1.98%) | 88,997,210 (+1.44%) | not timed |
+| all hands lowest | 83,847,636 (+1.12%) | 88,161,784 (+0.49%) | not timed |
+| TTPICK=2 (narrowest deciding entry over the whole chain) | 82,164,753 (-0.91%) | 86,943,889 (-0.90%) | |
+| ... narrow entries only (n <= 7) | 82,183,156 (-0.88%) | 86,957,430 (-0.88%) | public +1.8% (16.02M -> 16.31M median) |
+| ... wide entries only (n >= 8) | 82,902,275 (-0.02%) | 87,719,642 (-0.01%) | not timed |
+| P4WIDE: a 4-card table hit is stored with the entry's whole bound (decides more targets) | 82,925,907 (+0.01%) | 87,721,199 (-0.01%) | same-layout control: public 15.876M -> 15.874M, chunk1 16.71M -> 16.68M (noise) |
+
+Code layout: a build of the same search with harmless source changes (default-off switches,
+one extra captured variable in tt_store) ran 1.3-1.4% faster than the base build on both sets
+(public 16.26M -> 16.04M, chunk1 16.95M -> 16.71M median), with identical node counts. Differences
+of this size between two builds can be layout alone; compare a candidate against a control
+build that carries the same source edits with the feature switched off.
