@@ -2014,6 +2014,9 @@ inline u64 add_runs(u64 R, u64 tried, u64 hand, u64 all) {
   return R;
 }
 #ifdef SELFTEST
+#ifndef SELFTEST_MAX
+#define SELFTEST_MAX 13  // check lead nodes of 4 to SELFTEST_MAX cards
+#endif
 template <bool NT>
 bool lead(int n, int L, int target, u64& R);
 thread_local SState* g_alt = nullptr;
@@ -2025,6 +2028,11 @@ inline u64 st_rand() { g_st_rng ^= g_st_rng << 13; g_st_rng ^= g_st_rng >> 7; g_
 template <bool NT>
 void self_test(int n, int L, int target, u64 R, bool res) {
   if (g_st_depth || n < 4 || n > SELFTEST_MAX || (++g_st_cnt % SELFTEST)) return;
+#ifdef DDF_PAR
+  // solve_deal_parallel: an aborted work item returns no real value (it stores nothing), and
+  // at 13 cards a work item searches only some of hand 2's replies (mask2, ybw).
+  if (n == 13 || PAR_STOP()) return;
+#endif
   const u64 all = H[0] | H[1] | H[2] | H[3];
   u64 h0[4];
   for (int i = 0; i < 4; i++) h0[i] = H[i];
@@ -2048,8 +2056,10 @@ void self_test(int n, int L, int target, u64 R, bool res) {
   const bool r2 = lead<NT>(n, L, target, R2);
   g_st_depth--;
   S = keep;
-  g_st_checks++;
-  if (r2 != res) {
+  // The item may have been aborted during the re-search, which then has no real value.
+  const bool aborted = PAR_STOP();
+  if (!aborted) g_st_checks++;
+  if (!aborted && r2 != res) {
     fprintf(stderr, "SELFTEST FAIL n=%d L=%d t=%d nt=%d R=%llx orig %llx %llx %llx %llx\n", n, L, target, int(NT), (unsigned long long)R, (unsigned long long)h0[0], (unsigned long long)h0[1], (unsigned long long)h0[2], (unsigned long long)h0[3]);
     abort();
   }
@@ -2576,6 +2586,13 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
     {
       port::Pos& t = S->pos[n];
       fill_holdings(t);
+      // As in DDS, rank_in_suit has the led card out, but aggr, winner and second_best
+      // still describe the trick start: count the led card back in for those.
+      t.aggr[suit_of(lc)] |= uint16_t(lc >> (16 * suit_of(lc)));
+      H[(s + 3) & 3] ^= lc;
+      fill_tops(n, t);
+      H[(s + 3) & 3] ^= lc;
+      t.tricks_max = 0;
       t.lead = port::MoveType{suit_of(lc), (__builtin_ctzll(lc) & 15) + 2, 0, 0};
       clear_wr(t);
       const bool h2 = port::QuickTricksSecondHand(t, s, 4 * (n - 1) - 1, target, NT ? 4 : 3);
