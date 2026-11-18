@@ -41,7 +41,7 @@ inline ddcore::Position to_position(const Problem& p) {
 // A counter of the calling thread's user-mode events, or -1 (always -1 off Linux: the
 // WorkerStats counters then stay 0).
 #if !defined(__linux__)
-enum { PERF_TYPE_HARDWARE, PERF_TYPE_HW_CACHE, PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_BRANCH_MISSES,
+enum { PERF_TYPE_HARDWARE, PERF_TYPE_HW_CACHE, PERF_TYPE_RAW, PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_BRANCH_MISSES,
        PERF_COUNT_HW_CACHE_MISSES, PERF_COUNT_HW_CACHE_DTLB = 0, PERF_COUNT_HW_CACHE_OP_READ = 0, PERF_COUNT_HW_CACHE_RESULT_MISS = 0 };
 int perf_open(uint64_t, uint32_t = 0) { return -1; }
 #else
