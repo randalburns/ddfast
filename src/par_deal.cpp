@@ -45,7 +45,6 @@ void begin_deal(const ddclaim::Position& p) {
   memset(S->htried, 0, sizeof S->htried), memset(S->hcut, 0, sizeof S->hcut);
   memset(S->mres, 0, sizeof S->mres);
   S->rootL = p.leader;
-  g_expfalse = false;
 }
 
 // The root leads in the order lead() would try them (hint: the last cutting root lead).
@@ -323,7 +322,7 @@ int solve_deal_parallel(const ddclaim::Position& p, const int* cpus, int ncpu, u
   const int n = 13, L = p.leader;
   // North-South's tricks by solve_one's sequence of questions ("do North-South take t?").
   int lo = 0, hi = n;
-  int t = p.trump == 4 ? guess<true>(n, L) : guess<false>(n, L);  // as solve_one (GOFF 0)
+  int t = p.trump == 4 ? guess<true>(n, L) : guess<false>(n, L);  // as solve_one
   u64 hint = 0;
   while (lo < hi) {
     if (P.question(t, hint)) lo = t, t = lo + 1;
