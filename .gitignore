@@ -4,3 +4,6 @@
 /build/
 *.o
 *.a
+# The Python extension (python/build.sh) and Python caches
+python/ddfast/*.so
+__pycache__/

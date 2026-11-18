@@ -265,6 +265,47 @@ Thread safety: after `init()`, `solve`, `solve_table` and `solve_tables` may be 
 number of threads at once, as may the calls of this section. The two parallel calls share one pool and must not overlap;
 `solve_deal_parallel` has its own pool and must not overlap them either.
 
+## Python
+
+`python/` is a Python module (nanobind, one `.abi3.so` for CPython 3.12 and later) whose
+functions follow DDS 3.x's Python module `dds3`: `solve_board_pbn`, `calc_all_tables_pbn` and
+`SolverContext` take the same arguments and defaults, raise the same errors (`ValueError` /
+`RuntimeError`, "DDS error N: ...") and return the same dicts. Code written against `dds3` can
+switch with one line:
+
+```sh
+pip install nanobind && sh scripts/build.sh && sh python/build.sh    # -> python/ddfast/_ddfast.abi3.so
+export PYTHONPATH=python DDFAST_TABLES=...
+```
+
+```python
+import ddfast.dds3 as dds3          # instead of: import dds3
+r = dds3.solve_board_pbn("N:73.QJT.AQ54.T752 QT6.876.KJ9.AQ84 5.A95432.7632.K6 AKJ9842.K.T8.J93",
+                         trump=4, first=1, solutions=3)
+t = dds3.calc_all_tables_pbn([deal1, deal2], mode=0)      # tables and par (DDS's own par text)
+rs = dds3.solve_boards_pbn(samples, trump=4, first=1, solutions=3, max_threads=8)  # a batch
+```
+
+The search is ddfast's; DDS's PBN parser and par code are compiled in. Every return code,
+`cards`, score and `equals` agrees with DDS's SolveBoard on random positions at every stage of
+the play, including DDS's special cases (the last trick, a single legal move with `mode` 0,
+targets, every card scoring 0), as do tables and par (`python/test.sh`). Differences: `nodes`
+is 0; among equally good cards, which one `solutions` 1 reports, and the order of equal scores,
+may differ (DDS's own order depends on its table's history); `thread_index` and `context` are
+accepted and ignored (ddfast keeps its search table per thread and reuses it when DDS would);
+`calc_all_tables_pbn` takes any number of deals; `trump_filter` leaves strains out of the result
+but not out of the work.
+
+Threads: `solve_board_pbn` solves on the calling thread and releases the GIL, so calls from a
+thread pool run in parallel, as with dds3. `solve_boards_pbn` (not in dds3) solves a list of
+deals with the same strain, leader, current trick and options on ddfast's own threads, which
+it keeps between calls: for samples of one position (BEN's double-dummy evaluations) it was
+6-12x faster than one `solve_board_pbn` per sample on an 8-thread Python pool at tricks 7-10,
+where Python's per-call cost dominates, and equal in the first tricks
+(`python/tests/bench_ben.py`). `calc_all_tables_pbn` uses ddfast's table pool (`max_threads`).
+Per board, against DDS on one thread (`python/tests/compat_bench.cpp`): 3-4x faster with 11-13
+tricks left, 4-10x with 7-9, 12-39x with 5.
+
 ## Tests and benchmarks
 
 ```sh
@@ -298,7 +339,8 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/guess_*.inc` | fitted first guesses of the result |
 | `src/tables.hpp`, `src/tables.cpp` | the endgame tables: their layout and probes, and the code that loads and builds them |
 | `src/port.hpp` | the bit and vector primitives: AVX-512 and BMI2 on x86-64, Google Highway on Apple silicon |
-| `extern/dds` | DDS (submodule), for tests and benchmarks only |
+| `extern/dds` | DDS (submodule), for tests and benchmarks; the Python module compiles in its PBN parser and par code |
+| `python/` | the Python module (`dds3` interface), its build script and tests |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
 | `docs/LOO.md` | what each part of the design is worth (leave-one-out study) |
@@ -308,4 +350,5 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 
 Apache License 2.0 (see LICENSE), as is DDS. `src/dds_port.hpp` contains code taken
 from DDS (Copyright 2006-2014 Bo Haglund, 2014-2018 Bo Haglund and Soren Hein), marked in the
-file.
+file; the Python module compiles in DDS's `pbn.cpp`, `par.cpp`, `dealer_par.cpp` and
+`utility/constants.cpp` from the submodule.
