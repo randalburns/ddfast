@@ -204,6 +204,11 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
 #ifndef DFOL
 #define DFOL 99
 #endif
+// S->trk (the cards played to the current trick) is read only by the port's follow ordering
+// (dds_order with K >= 1, from DFOL cards); the lead card reaches follow 1 as its best card.
+// Without DFOL the stores are dead, and as stores through a pointer they made the compiler
+// reload H and LENS.
+#define TRK_NEEDED (DFOL <= 13)
 namespace port = ddfast::port;
 // The per-deal transposition table. A directory maps the exact key (suit lengths of lanes
 // 1-3, leader, card count) to a chain of blocks of 8 patterns; blocks come from a pool that
@@ -1825,11 +1830,11 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
 #ifdef DDF_PAR
 // The parallel search: a thread's own table first, then (from PAR_SHMIN cards) the table
 // shared by all threads of the deal, under one lock (par_deal.cpp).
-inline int tt_lookup_in(TT& tt, int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
+[[gnu::always_inline]] inline int tt_lookup_in(TT& tt, int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
   {
     const bool wide = n >= 8;
 #else
-inline int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
+[[gnu::always_inline]] inline int tt_lookup(int n, int target, u64 all, u64 ewq, u64 swq, u64 key54, u64& hint, u64& R) {
   {
     const bool wide = n >= 8;
     TT& tt = S->tt;
@@ -2292,7 +2297,7 @@ bool lead(int n, int L, int target, u64& R) {
     STAT(nodes1 = g_nodes);
     STAT(firstc = firstc ? firstc : c);
     const int sh = 16 * L + 4 * suit_of(c);
-    S->trk[n][0] = c;
+    if constexpr (TRK_NEEDED) S->trk[n][0] = c;
     H[L] ^= c;
     LENS -= 1ull << sh;
     u64 Rc;
@@ -2560,7 +2565,7 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
   alignas(64) u64 cards[16];
   alignas(32) uint16_t key[16];
   if (K == 1 && n >= DMIN) {
-    const u64 lc = S->trk[n][0];
+    const u64 lc = best;  // follow 1: the lead card
     const bool hit = native_second<NT>(s, lc, cut ? target : n + 1 - target, R);
 #ifdef VERIFY_ORDER
     {
@@ -2605,7 +2610,7 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
     if (first) why0 = why;
 #endif
     tried |= c;
-    S->trk[n][K] = c;
+    if constexpr (TRK_NEEDED) S->trk[n][K] = c;
     const bool same = (c & lane_of(best)) != 0, ruff = (c & TR) != 0;
     const bool beats = same ? c > best : ruff;
     const u64 nb = beats ? c : best;
