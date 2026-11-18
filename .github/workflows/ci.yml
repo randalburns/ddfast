@@ -4,9 +4,7 @@
 #               (Once the Highway fallback exists, add a linux-x86-hwy job that runs every
 #               time and gate this one on needs.changes.outputs.simd.)
 #   linux-arm   every time: the Highway path (AArch64) on Linux (ELF, clang/GCC).
-#   macos       the Highway path with Apple clang and the macOS system code, when files with
-#               macOS-specific code change (needs.changes.outputs.mac), and always on main, on
-#               the weekly run and on manual runs.
+#   macos       every time: the Highway path with Apple clang and the macOS system code.
 #   ci-ok       the one check to require in branch protection: passes when every job above
 #               passed or was skipped.
 # The two Arm jobs build against the same pinned Highway release (HWY_VERSION; headers only).
@@ -31,7 +29,6 @@ jobs:
   changes:
     runs-on: ubuntu-24.04
     outputs:
-      mac: ${{ github.event_name != 'pull_request' || steps.f.outputs.mac == 'true' }}
       simd: ${{ github.event_name != 'pull_request' || steps.f.outputs.simd == 'true' }}
     steps:
       - uses: actions/checkout@v4
@@ -39,15 +36,6 @@ jobs:
         id: f
         with:
           filters: |
-            mac:
-              - 'src/api.cpp'
-              - 'extern/ddclaim/src/ddclaim.cpp'
-              - 'extern/ddclaim/include/ddclaim/port.hpp'
-              - 'tests/common.hpp'
-              - 'bench/positions.hpp'
-              - 'scripts/build.sh'
-              - 'scripts/ci.sh'
-              - '.github/workflows/ci.yml'
             simd:
               - 'src/solver.cpp'
               - 'extern/ddclaim/include/ddclaim/port.hpp'
@@ -114,8 +102,6 @@ jobs:
         run: HWY_INC=$PWD/highway sh scripts/ci.sh
 
   macos:
-    needs: changes
-    if: needs.changes.outputs.mac == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
