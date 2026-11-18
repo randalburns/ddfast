@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Endgame Tables</title>
-<meta name="description" content="How ddfast answers the last 2, 3 and 4 cards of each hand from precomputed tables, with examples from the real tables.">
+<meta name="description" content="How ddfast answers the last 2, 3 and 4 cards of each hand from precomputed tables.">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
 /* Layout: one reading column (~68ch) with figures and code allowed to run wider; tables scroll inside their own box. */
@@ -126,83 +126,50 @@ li { margin: 4px 0; }
 <body>
 <main>
 <header>
-  <div class="eyebrow">ddfast &#183; endgame tables</div>
+  <div class="eyebrow"><a href="./">ddfast design</a> &#183; endgames</div>
   <h1>Endgame Tables</h1>
-  <p class="lede">How ddfast answers the last tricks of a deal from precomputed tables: every 2-card and 3-card ending is a single lookup, and 4-card endings are matched against a large table of learned card patterns.</p>
+  <p class="lede">The last tricks of a deal are answered from precomputed tables: every 2-card and 3-card ending is one lookup, and 4-card endings are matched against a table of learned card patterns.</p>
 </header>
 
 <div class="facts">
-  <div><b>1.30&#215;</b>slower with both tables turned off; nodes +56%. LOO</div>
-  <div><b>3-4%</b>what either table saves on its own: each covers for the other. LOO</div>
-  <div><b>1.1 GB</b>of table files, built once on first use. README</div>
+  <div><b>1.30&#215;</b>slower with both tables off; the search grows by 56%</div>
+  <div><b>3-4%</b>is all either table saves alone: each covers for the other</div>
+  <div><b>1.1 GB</b>of table files, built once on first use</div>
 </div>
-
-<p>Excerpts are from <code>tables.hpp</code> (the table layouts and the probes, which inline into the search) and <code>src/solver.cpp</code>. The examples were checked by running the real probes on the real tables. Figures come from <code>docs/LOO.md</code> (one Zen 5 core) and <code>README.md</code>.</p>
 
 <h2>Where the tables sit in the search</h2>
-<p>ddfast asks yes/no questions: "with this leader, does North-South take at least <i>t</i> of the remaining <i>n</i> tricks?" At every lead node, before generating any moves, it tries to settle the question cheaply, in this order:</p>
+<p>ddfast asks yes/no questions: "does North-South take at least <i>t</i> of the remaining <i>n</i> tricks?" At the start of every trick it tries to settle the question without searching, in this order:</p>
 <div class="flow">
-  <div class="step"><span class="n">1 card</span><p>Play the trick out directly: four cards, one winner.</p></div>
-  <div class="step tab"><span class="n">2 cards</span><p>One lookup in the 2-card table. Always exact.</p></div>
-  <div class="step tab"><span class="n">3 cards</span><p>One lookup in the 3-card table. Always exact.</p></div>
-  <div class="step"><span class="n">4+ cards</span><p>The per-deal transposition table, then DDS's quick-tricks and later-tricks bounds.</p></div>
-  <div class="step tab"><span class="n">4 cards</span><p>The 4-card pattern table. A hit is copied into the per-deal table, where it is cheaper to find again.</p></div>
-  <div class="step"><span class="n">otherwise</span><p>Search: generate the leads and recurse.</p></div>
+  <div class="step"><span class="n">1 card</span><p>Play the trick out: four cards, one winner.</p></div>
+  <div class="step tab"><span class="n">2 cards</span><p>One lookup in the 2-card table. Always answers.</p></div>
+  <div class="step tab"><span class="n">3 cards</span><p>One lookup in the 3-card table. Always answers.</p></div>
+  <div class="step"><span class="n">4+ cards</span><p>The transposition table of this deal, then DDS's quick-tricks and later-tricks bounds.</p></div>
+  <div class="step tab"><span class="n">4 cards</span><p>The 4-card pattern table. A hit is copied into the deal's transposition table, where it is cheaper to find again.</p></div>
+  <div class="step"><span class="n">otherwise</span><p>Search: try the leads.</p></div>
 </div>
-<pre><code>if (n == 2 &amp;&amp; g_use2) return probe2&lt;NT&gt;(H, L, all, target, R);
-if (n == 3 &amp;&amp; g_use3) return probe3&lt;NT&gt;(H, L, all, target, R, [] { yield(); });
-...
-if (n &gt;= 4 &amp;&amp; n &lt; 4 + P_LEVELS &amp;&amp; g_pt[n - 4].use) {
-  const int r = probe_pattern&lt;NT&gt;(H, LENS, n, L, all, target, pq, R, hit, [] { yield(); });
-  if (r &gt;= 0) {
-    tt_store(R, r, 0);  // a pattern in the per-deal table is cheaper to find again
-    return r;
-  }
-}</code></pre>
-<p class="src">src/solver.cpp, lead()</p>
-<p>Like every node of the search, a probe returns the answer and <b>R</b>, the cards that decided it. R is widened to every card above them in their suit (<code>fill_up</code>), and the parent folds it into the pattern it stores. So the tables do more than end the search two or three tricks early: they hand back small sets of relevant cards, which make the patterns above them more general.</p>
+<p>A lookup returns the answer and the <b>cards that decided it</b>. The search above stores its own result as a pattern over just those cards, so a small deciding set makes that stored result apply to many more positions. The tables therefore do more than stop the search a few tricks early.</p>
 
-<h2>What all three tables share</h2>
+<h2>The three tables</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Cards a hand</th><th>Holds</th><th>Size</th><th>Lookup</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>every ending</td><td class="num">3.3 MB, in memory</td><td>one read</td></tr>
+<tr><td>3</td><td>every ending</td><td class="num">377 MB</td><td>one read of 5 bytes</td></tr>
+<tr><td>4</td><td>learned patterns</td><td class="num">758 MB</td><td>8 patterns matched at a time</td></tr>
+</tbody></table></div>
+<p>All three are indexed the same way, so that equivalent endings share an entry:</p>
 <ul>
-<li><b>Leader-relative.</b> A probe sees the four hands from the leader's seat and answers for the leader's side, so one entry serves all four leaders.</li>
-<li><b>Compressed over the cards in play.</b> The cards still in play are packed together with <code>pext</code>, so only which ones are higher matters, not their ranks. Two bit strings over those packed cards give each card's owner: one is set for the leader's left- and right-hand opponents, the other for partner and the right-hand opponent.</li>
-<li><b>Trumps in a fixed lane, side suits sorted.</b> ddfast always keeps trumps in lane 3. The 3-card and 4-card tables also sort the three side suits by length with a byte shuffle (<code>shuf8</code>), so endings that differ only in which side suit is which share one entry.</li>
-<li><b>Cards that mattered are stored.</b> Each answer comes with its set of deciding cards: the smallest exact set in the 2- and 3-card tables, and the set the search proved in a 4-card pattern.</li>
+<li><b>From the leader's seat.</b> One entry serves all four leaders.</li>
+<li><b>Over the cards in play.</b> The remaining cards are packed together (<code>pext</code>), so only their order matters, not their ranks. Two bit strings over the packed cards say who holds each one.</li>
+<li><b>Trumps in a fixed place, side suits sorted by length.</b> Endings that differ only in which side suit is which share one entry.</li>
 </ul>
-<pre><code>const u64 h3 = H[(L + 3) &amp; 3];
-const u64 alls = ddport::shuf8(all, ctl);               // side suits sorted by length
-const u64 ews = ddport::shuf8((H[(L + 1) &amp; 3] | h3), ctl);
-const u64 sws = ddport::shuf8((H[(L + 2) &amp; 3] | h3), ctl);
-const ddport::BitMask am(alls);
-const unsigned lo = unsigned(am.ext(ews)), hi = unsigned(am.ext(sws));</code></pre>
-<p class="src">tables.hpp, probe3</p>
+<p>With two cards a hand there are 70 &#215; 6 &#215; 6 = 2,520 ways to deal eight given cards; with three, 924 &#215; 20 &#215; 20 = 369,600 ways to deal twelve, for each of 102 suit-length shapes and both strains. Each entry stores the answer and the smallest set of cards that decides it, for every target.</p>
 
-<h2>2 cards: every ending, in memory</h2>
-<p>Eight cards, two per hand. The index is the suit-length composition of the eight cards, the strain, and the arrangement: which 4 of the 8 cards the opponents hold (C(8,4) = 70), which 2 of those are the right-hand opponent's (6), and which 2 of the leader's side's are partner's (6). That gives 70 &#215; 6 &#215; 6 = 2,520 arrangements. Each entry holds, for both targets, the answer and the 8-bit set of cards that mattered.</p>
-<pre><code>const unsigned rank = g_r70[lo] * 36 + g_r6[ddport::pext16(hi, lo)] * 6 + g_r6[ddport::pext16(hi, lo ^ 0xFF)];
-const unsigned comp = g_comp[popc(all &amp; LANE(0)) + 9 * popc(all &amp; LANE(1)) + 81 * popc(all &amp; LANE(2))];
-const uint16_t e = g_t2[((comp * 2 + NT) * 2520 + rank) * 2 + (tl - 1)];
-R = fill_up(am.dep(e &amp; 0xFF));</code></pre>
-<p class="src">tables.hpp, probe2. The second pext ranks the right-hand opponent's cards among the opponents' four; the third ranks partner's among the leader's side's four.</p>
-<p>The table is 3.3 MB and is built in memory by every <code>init()</code> in a fraction of a second. Each stored set of mattering cards is the smallest exact one: every set of top cards was checked against all endings with the same suit lengths.</p>
-
-<h2>3 cards: every ending, on disk</h2>
-<p>Twelve cards, three per hand: C(12,6) &#215; C(6,3) &#215; C(6,3) = 924 &#215; 20 &#215; 20 = 369,600 arrangements, for each of 102 suit-length configurations (side suits sorted) and both strains. Five bytes per ending: the leader's side's tricks in 2 bits, then for each target 1 to 3 the 12-bit set of cards that matter. The file <code>t3_v2.bin</code> is 377 MB. A probe is one prefetched 5-byte read.</p>
-<pre><code>const size_t rank = size_t(g_r924[lo]) * 400 + g_r20[ddport::pext16(hi, lo)] * 20 + g_r20[ddport::pext16(hi, lo ^ 0xFFF)];
-const size_t cfg = g_cfg3[p0 + 13 * p1 + 169 * p2];
-const uint8_t* addr = g_t3 + ((cfg * 2 + NT) * T3_ARR + rank) * 5;
-...
-const int tl = cut ? target : 4 - target;
-const u64 m = am.dep((e &gt;&gt; (12 * tl - 10)) &amp; 0xFFF);
-R = fill_up(shuffle_lanes(m, g_unshuf[pid]));
-return (int(e &amp; 3) &gt;= tl) == cut;</code></pre>
-<p class="src">tables.hpp, probe3</p>
-
-<h3>Example: a finesse</h3>
-<p>South leads at no trumps with ♠AQ in dummy, ♠32 in hand and the ♦A as an entry. Only where the ♠K sits differs between the two endings.</p>
+<h3>Example: a finesse in the 3-card table</h3>
+<p>South leads at no trumps with &#9824;AQ in dummy, &#9824;32 in hand and the <span class="red">&#9830;</span>A as an entry. These are the real table's answers; only the &#9824;K moves between the two endings.</p>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>2</div><div class="seat w"><span class="who">West</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q</div><div class="seat e"><span class="who">East</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>3</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A</div><div class="trick">3 cards<br>no trumps</div></div>
 <div class="tablewrap"><table class="res">
-<thead><tr><th>Question (king with West)</th><th>Answer</th><th>Cards in play that decided it</th></tr></thead>
+<thead><tr><th>King with West</th><th>Answer</th><th>Cards that decided it</th></tr></thead>
 <tbody>
 <tr><td>NS &#8805; 1?</td><td>yes</td><td><span class="red">&#9830;</span>A</td></tr>
 <tr><td>NS &#8805; 2?</td><td>yes</td><td><span class="red">&#9830;</span>A &#9824;A</td></tr>
@@ -210,72 +177,44 @@ return (int(e &amp; 3) &gt;= tl) == cut;</code></pre>
 </tbody></table></div>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>2</div><div class="seat w"><span class="who">West</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>3</div><div class="seat e"><span class="who">East</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A</div><div class="trick">3 cards<br>no trumps</div></div>
 <div class="tablewrap"><table class="res">
-<thead><tr><th>Question (king with East)</th><th>Answer</th><th>Cards in play that decided it</th></tr></thead>
+<thead><tr><th>King with East</th><th>Answer</th><th>Cards that decided it</th></tr></thead>
 <tbody>
 <tr><td>NS &#8805; 1?</td><td>yes</td><td><span class="red">&#9830;</span>A</td></tr>
 <tr><td>NS &#8805; 2?</td><td>yes</td><td><span class="red">&#9830;</span>A &#9824;A</td></tr>
 <tr><td>NS &#8805; 3?</td><td>no</td><td>&#9824;A &#9824;K</td></tr>
 </tbody></table></div>
-<p>The deciding sets are what make a lookup useful to the search above it. "At least one trick" depends only on who holds the ♦A, so the result the parent stores holds for any placement of the other cards. Three tricks with the king onside depend on the ♠A, K and Q, and on the ♦A for the entry; the low cards do not matter.</p>
+<p>"At least one trick" depends only on who holds the <span class="red">&#9830;</span>A, so that answer holds wherever the other eleven cards are. Three tricks depend on the &#9824;A, K and Q and the <span class="red">&#9830;</span>A; the low cards never matter.</p>
 
-<h2>4 cards: a table of learned patterns</h2>
-<p>A complete 4-card table would be far too large, so the 4-card table is not complete. It holds <b>patterns</b>: each one is a true statement about a whole class of endings with the same suit lengths in all four hands, naming only the owners of the cards that mattered and a bound on the leader's side's tricks. The patterns are learned when the table is built: random 6-card endings are solved for a fixed time, and every pattern proved for a 4-card ending along the way is kept. The table is then read-only.</p>
-<ul>
-<li><b>Key:</b> the suit lengths of all four hands, leader-relative, side suits sorted, and the strain. A directory maps the key to a run of groups of 8 entries, most-hit first.</li>
-<li><b>Entry:</b> <code>a</code>, the owners of the cards that mattered (the two owner bit strings, compressed); <code>b</code>, those cards, with 3-bit lower and upper bounds in bits 56-58 and 59-61.</li>
-<li><b>Match:</b> an entry decides the question when <code>(b &amp; own) == a</code> and its bounds settle the target. Eight entries are tested at once (<code>ddport::pmatch8</code>: AVX-512 on x86, Google Highway on Apple silicon), and groups are prefetched 8 at a time.</li>
-<li><b>Size:</b> <code>p4_v5.ent</code> and <code>.idx</code>, 758 MB, read into memory at load time.</li>
-</ul>
-<pre><code>for (int j = 0; j &lt; groups; j++) {
-  ...
-  const unsigned kd = ddport::pmatch8(ea + 8 * j, eb + 8 * j, q.own, tl);
-  if (kd) {
-    const int i = __builtin_ctz(kd);
-    const u64 bb = eb[8 * j + i];
-    const int blo = int(bb &gt;&gt; 56) &amp; 7;
-    const u64 mk = am.dep(bb &amp; ((1ull &lt;&lt; (4 * n)) - 1));
-    R = fill_up(shuffle_lanes(mk, g_unshuf[q.pid]));
-    return (blo &gt;= tl) == cut;
-  }
-}
-return -1;  // no entry decides: the search goes on</code></pre>
-<p class="src">tables.hpp, probe_pattern</p>
+<h2>4 cards: learned patterns</h2>
+<p>A table of every 4-card ending would be far too large. The 4-card table holds <b>patterns</b> instead: each is a proved statement about every ending with given suit lengths in the four hands, naming only the owners of the cards that mattered and a bound on the leader's side's tricks. The patterns are learned when the table is built, by solving random 6-card endings for a fixed time and keeping every pattern proved for a 4-card ending on the way.</p>
+<p>A lookup finds the patterns for the ending's suit lengths and tests eight at a time (AVX-512 on x86, Google Highway on Apple silicon): a pattern answers when its cards have the same owners in this ending and its bound settles the question. Because every pattern is proved, a hit is exact. When no pattern answers, the search goes on.</p>
 
 <h3>Example: the finesse with a fourth card</h3>
-<p>Add a diamond to each hand of the onside ending above.</p>
+<p>Add a diamond to each hand of the first ending above.</p>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>K 2</div><div class="seat w"><span class="who">West</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q &nbsp;<span class="red">&#9830;</span>J</div><div class="seat e"><span class="who">East</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>Q 3</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A 4</div><div class="trick">4 cards<br>no trumps</div></div>
 <div class="tablewrap"><table class="res">
-<thead><tr><th>Question</th><th>Pattern table</th><th>Cards in play that decided it</th></tr></thead>
+<thead><tr><th>Question</th><th>Pattern table</th><th>Cards that decided it</th></tr></thead>
 <tbody>
 <tr><td>NS &#8805; 1?</td><td>yes</td><td>&#9824;A</td></tr>
 <tr><td>NS &#8805; 2?</td><td>yes</td><td>&#9824;A &#9824;K &#9824;Q</td></tr>
 <tr><td>NS &#8805; 3?</td><td>yes</td><td><span class="red">&#9830;</span>A <span class="red">&#9830;</span>K &#9824;A</td></tr>
-<tr><td>NS &#8805; 4?</td><td>no entry decides</td><td>&#8212;</td></tr>
+<tr><td>NS &#8805; 4?</td><td>no pattern</td><td>&#8212;</td></tr>
 </tbody></table></div>
-<p>Three of the four questions are answered by patterns. The fourth (South's side can in fact take all four tricks) has no pattern, so the search plays that ending out. Below it, every 3-card ending is a single lookup. With the king offside, the table answers all four questions, including "no" to four tricks.</p>
+<p>Patterns answer three of the four questions. The fourth has none (South can in fact take all four tricks), so the search plays that one out, and one trick later every ending is a single 3-card lookup.</p>
 
 <h2>What the tables are worth</h2>
-<p>With the tables turned off, the endings are searched instead. On the 600-deal public set, one Zen 5 core:</p>
+<p>With a table turned off, its endings are searched instead. On the 600-deal public set, one Zen 5 core (<a href="https://github.com/randalburns/ddfast/blob/main/docs/LOO.md">leave-one-out study</a>):</p>
 <div class="tablewrap"><table>
-<thead><tr><th>Turned off</th><th>Nodes</th><th>Slowdown</th><th>Source</th></tr></thead>
+<thead><tr><th>Turned off</th><th>Nodes</th><th>Slowdown</th></tr></thead>
 <tbody>
-<tr><td>Both: 3-card and 4-card tables</td><td class="num">+56%</td><td class="num">1.30&#215;</td><td>LOO</td></tr>
-<tr><td>3-card table alone</td><td class="num">+7.3%</td><td class="num">1.04&#215;</td><td>LOO</td></tr>
-<tr><td>4-card pattern table alone</td><td class="num">+7.5%</td><td class="num">1.03&#215;</td><td>LOO</td></tr>
-<tr><td>4-card hits not copied into the per-deal table</td><td class="num">&#8722;0.5%</td><td class="num">1.04&#215;</td><td>LOO</td></tr>
+<tr><td>Both tables</td><td class="num">+56%</td><td class="num">1.30&#215;</td></tr>
+<tr><td>3-card table only</td><td class="num">+7.3%</td><td class="num">1.04&#215;</td></tr>
+<tr><td>4-card pattern table only</td><td class="num">+7.5%</td><td class="num">1.03&#215;</td></tr>
 </tbody></table></div>
-<p><b>The tables stand in for each other.</b> Without the 3-card table, the 4-card patterns, the per-deal table and the bounds still catch most of the endings it would have answered, and the other way round. Only with both gone does the search grow by half. The tables matter even more for small positions: the README measures ddfast at 13&#215; DDS's speed on 7-card positions and 58&#215; at 5 cards.</p>
+<p><b>The tables stand in for each other.</b> Without one of them, the other, the transposition table and the bounds still catch most of the endings it would have answered. Only with both gone does the search grow by half. The tables matter more for small positions: ddfast is 13&#215; DDS's speed on 7-card positions and 58&#215; at 5 cards.</p>
 
 <h2>Building them</h2>
-<p>The first <code>init()</code> builds whatever is missing, whatever it is asked to solve: the 3-card table in about 10 seconds (on 8 cores) by solving every 3-card ending, then the pattern table in up to 170 seconds on all cores, using up to about 5 GB of memory. The files go to the directory given to <code>init()</code>, or the default described in the README. Because the pattern table is filled for a fixed time, tables built on different machines can differ in size; the answers are exact either way, since every pattern is a proved statement (README).</p>
-
-<h2>Reimplementing it</h2>
-<ul>
-<li>Make every node return the cards its answer depended on, and store minimal sets in the tables.</li>
-<li>Index endings leader-relative, compressed over the cards in play, with trumps in a fixed lane and the side suits sorted by length.</li>
-<li>Store small endings completely (here 2 and 3 cards); above that, store learned patterns, not positions.</li>
-<li>Expect overlap: each table alone is worth 3-4% here, the pair 30%.</li>
-</ul>
+<p>The first <code>init()</code> builds whatever is missing: the 3-card table in about 10 seconds on 8 cores, then the pattern table in up to 170 seconds on all cores, using up to about 5 GB of memory. The pattern table is filled for a fixed time, so tables built on different machines differ in size; the answers are exact either way.</p>
 </main>
 </body>
 </html>

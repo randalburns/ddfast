@@ -88,20 +88,28 @@ th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rul
 th { font: 600 0.72rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: var(--font-mono); font-size: 0.85rem; }
 .note { border-left: 3px solid var(--guard); padding: 4px 0 4px 12px; color: var(--muted); font-size: 0.92rem; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.facts > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; font-size: 0.85rem; color: var(--muted); }
+.facts b { display: block; font: 700 1.5rem/1.2 var(--font-display); color: var(--fg); }
+.eyebrow a { color: inherit; }
 ul { padding-left: 20px; margin: 8px 0; }
 li { margin: 4px 0; }
 </style>
 
 <main>
 <header>
-  <div class="eyebrow">ddfast &#183; hand representation</div>
+  <div class="eyebrow"><a href="./">ddfast design</a> &#183; hand representation</div>
   <h1>One Word per Hand</h1>
-  <p class="lede">In ddfast (an exact double-dummy solver, about four times faster than DDS on one core) and in its endgame tables, each bridge hand is a single 64-bit integer. Following suit, finding playable cards, deciding a trick and building table keys are each a few bit operations on four such words.</p>
+  <p class="lede">In ddfast each bridge hand is a single 64-bit integer. Following suit, finding the playable cards and deciding a trick are each a few bit operations on four such words.</p>
 </header>
 
-<p>This page explains that representation well enough to reimplement it. Every excerpt is from the source: <code>tables.hpp</code> and <code>port.hpp</code> (the helpers, shared by the search and the <a href="endgame-tables.html">endgame tables</a>) and <code>src/solver.cpp</code> (the search). The worked examples were checked by running the real helpers on the example hands. Figures come from <code>README.md</code> and <code>docs/LOO.md</code>.</p>
+<div class="facts">
+  <div><b>1.3-1.4&#215;</b>over DDS from the representation alone, with DDS's own search</div>
+  <div><b>1.52&#215;</b>from hardware <code>pext</code>/<code>pdep</code>: without them the advantage is gone</div>
+  <div><b>1 XOR</b>and one 4-bit counter to play a card or take it back</div>
+</div>
 
-<div class="note" style="margin: 16px 0;"><b>What the representation is worth.</b> Run with DDS's own search (same first guess, bounds and move ordering, no endgame tables), one word per hand, with trumps in a fixed lane and DDS's bounds and lead weights rewritten on the words, is worth <b>1.3-1.4&#215;</b> over DDS: about a fifth of ddfast's 4.27&#215; on a log scale. The other 3.2&#215; comes from the search. The representation's advantage depends on hardware <code>pext</code>/<code>pdep</code>: with the byte-table emulation used on Arm, the cost per node matches DDS's, and inside full ddfast hardware <code>pext</code>/<code>pdep</code> alone is worth 1.52&#215;.</div>
+<p>The excerpts are from the source (<code>tables.hpp</code>, <code>port.hpp</code> and <code>src/solver.cpp</code>), and the worked examples were checked by running the real helpers on the example hands.</p>
 
 <h2>The layout</h2>
 <p>The position is four hand words <code>H[4]</code>, indexed by seat (0 North, 1 East, 2 South, 3 West), plus a second word <code>LENS</code> that holds the suit lengths. Inside a hand word each suit gets a 16-bit lane. Bit <i>r</i> of a lane is rank 2&nbsp;+&nbsp;<i>r</i>, so the two is bit 0 and the ace is bit 12. Bits 13 and 14 are never set. Bit 15 is the <b>guard</b> bit. It is always zero in a hand, and the helpers set it in temporary values so that borrows and run detection stop at the edge of each suit.</p>
@@ -127,19 +135,12 @@ inline int suit_of(u64 c) { return __builtin_ctzll(c) >> 4; }</code></pre>
 
 <h3>Trumps always live in lane 3</h3>
 <p>When the position is loaded, the trump suit swaps lanes with suit 3. After that, "is this card a trump?" is <code>c &amp; LANE(3)</code> with a constant mask, and the trump test is fixed at compile time:</p>
-<pre><code>for (int s = 0; s &lt; 4; s++) {
-  int lane = s;
-  if (tr &lt; 4) lane = s == tr ? 3 : (s == 3 ? tr : s);
-  hq |= u64(p.hand[q][s]) &lt;&lt; (16 * lane);
-  lens |= u64(__builtin_popcount(p.hand[q][s])) &lt;&lt; (16 * q + 4 * lane);
-}</code></pre>
-<p class="src">src/solver.cpp, solve_position</p>
 <pre><code>template &lt;bool NT&gt;
 struct Cfg {
   static constexpr u64 TR = NT ? 0 : LANE(3);
 };</code></pre>
 <p class="src">src/solver.cpp</p>
-<p>Because the search is a template on <code>NT</code>, the no-trump build has <code>TR = 0</code> and the ruff tests compile away. The fixed trump lane also helps the <a href="endgame-tables.html">endgame tables</a>: they sort lanes 0 to 2 (the side suits) by length with a byte shuffle (<code>shuffle_lanes</code> / <code>ddport::shuf8</code>) and leave lane 3 alone, so equivalent endings share one table entry.</p>
+<p>Because the search is a template on <code>NT</code>, the no-trump build has <code>TR = 0</code> and the ruff tests compile away. The fixed trump lane also helps the <a href="endgame-tables.html">endgame tables</a>: they sort the three side suits by length and leave lane 3 alone, so equivalent endings share one table entry.</p>
 
 <h3>Suit lengths in a second word</h3>
 <p><code>LENS</code> is laid out differently from the hands: one 16-bit lane per <em>seat</em>, and inside it one 4-bit nibble per suit. Nibble <code>4*seat + suit</code>, at bit <code>16*seat + 4*suit</code>, holds the length of that holding.</p>
@@ -159,7 +160,7 @@ inline u64 above(u64 c) { return ~((c &lt;&lt; 1) - 1); }        // all bits abo
 inline u64 lowest(u64 x) { return x &amp; (0 - x); }
 inline u64 highest(u64 x) { return 1ull &lt;&lt; (63 - __builtin_clzll(x)); }</code></pre>
 <p class="src">tables.hpp</p>
-<p><code>0 - c</code> sets c and every bit above it, and the lane mask trims the result to c's suit. <code>ge(&#9824;T)</code> = <code>0x1f00</code> = &#9824;A K Q J T. The top card of a suit is <code>highest(x &amp; LANE(s))</code>. The vector code below gets the top card of all four suits at once with a per-lane <code>lzcnt</code>.</p>
+<p><code>0 - c</code> sets c and every bit above it, and the lane mask trims the result to c's suit. <code>ge(&#9824;T)</code> = <code>0x1f00</code> = &#9824;A K Q J T. The top card of a suit is <code>highest(x &amp; LANE(s))</code>.</p>
 
 <h3>fill_up: every card at and above the lowest one, in each suit</h3>
 <pre><code>inline u64 fill_up(u64 x) {
@@ -170,7 +171,7 @@ inline u64 highest(u64 x) { return 1ull &lt;&lt; (63 - __builtin_clzll(x)); }</c
 <p class="src">tables.hpp</p>
 <p>The guard bit makes every lane nonzero, so <code>y - ONES</code> subtracts 1 in each lane with no borrow crossing a lane boundary. <code>y &amp; ~(y - ONES)</code> keeps the lowest set bit of each lane, which is the guard for an empty lane. <code>GUARD - low</code> then sets, in each lane, every bit from that lowest bit up to bit 14, and is zero in a lane where low was the guard. <code>ALL_LANES</code> trims the result to bits 0 to 12.</p>
 <p>Worked: x = {&#9824;J, <span class="red">&#9830;K</span>}. Then y = <code>0x8000880080008200</code>, low = <code>0x8000080080000200</code>, and the result is <code>0x0000180000001e00</code> = &#9824;AKQJ and <span class="red">&#9830;AK</span>. Hearts and clubs are empty.</p>
-<p>The search uses this for <b>relevant cards</b>, the cards whose ranks a result depends on. If the &#9824;J mattered, then who holds the A, K and Q matters too. After fill_up, the relevant set in each suit is "the top k cards of the suit", which makes a compact table pattern (see below).</p>
+<p>The search uses this for <b>relevant cards</b>, the cards whose ranks a result depends on. If the &#9824;J mattered, then who holds the A, K and Q matters too. After fill_up, the relevant set in each suit is "the top k cards of the suit", which makes a compact pattern to store.</p>
 
 <h3>One card per run of touching cards, with pext and pdep</h3>
 <p>Cards that touch in play are equivalent: once &#9824;8, 7 and 6 are gone, North's &#9824;T, 9 and 5 behave the same. The search tries only one card from each such run, and finds the top of every run in one step. <code>pext</code> packs the cards in play together so that cards which touch become adjacent bits. A shift and a mask then find the tops, and <code>pdep</code> puts the result back in place:</p>
@@ -187,17 +188,6 @@ inline u64 highest(u64 x) { return 1ull &lt;&lt; (63 - __builtin_clzll(x)); }</c
 <figcaption>The spade lane of <code>heads(North, all)</code>. pext keeps the 11 positions in play (10 spades plus the guard), packed low. In the packed form a card heads a run when the next card up is not North's. The guard bit is in <code>p</code> but never in a hand, so it stops runs at the suit boundary. <code>pm = 0x338</code>, <code>hc = 0x220</code>, and pdep gives back &#9824;A and &#9824;T. The optional <code>seq</code> output marks heads that have another card of the run below them.</figcaption>
 </figure>
 <p>Over the whole hand, <code>heads(North, all)</code> returns 9 candidates out of 13 cards: &#9824;A T, <span class="red">&#9829;Q 3, &#9830;K 7</span>, &#9827;A 6 4. (The &#9827;6 and &#9827;4 are separate runs because the &#9827;5 is still in play.)</p>
-<p>The search also needs the bottom of a run. When a run wins a trick, the relevant card is the lowest card of the winning run, so <code>run_bottom</code> uses the same packing:</p>
-<pre><code>inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
-  const u64 p = present | GUARD_BITS;
-  const u64 pm = _pext_u64(rest, p), bc = _pext_u64(c, p);
-  const u64 t = ~pm &amp; (bc - 1);
-  const u64 bb = 1ull &lt;&lt; (64 - _lzcnt_u64(t));  // just above the highest gap below c, or bit 0
-  return _pdep_u64(bb, p);
-}</code></pre>
-<p class="src">port.hpp (x86)</p>
-<p>Worked: <code>run_bottom(&#9824;T, North without &#9824;T, all)</code> = &#9824;5.</p>
-
 <h3>Following suit</h3>
 <p>The candidate cards at a follow node take two lines. With <code>lane</code> the mask of the suit led, the player follows suit if possible and otherwise may play anything:</p>
 <pre><code>const u64 mine = H[s];
@@ -226,80 +216,16 @@ inline void trick_step(u64 x, int s, u64&amp; best, int&amp; bw, bool&amp; ranke
 <tr><td>S <span class="red">&#9829;5</span></td><td>0</td><td>1</td><td>ruff</td><td class="num"><span class="red">&#9829;5</span>, S</td><td>0</td></tr>
 <tr><td>W <span class="red">&#9829;9</span></td><td>1</td><td>1</td><td>9 &gt; 5</td><td class="num"><span class="red">&#9829;9</span>, W</td><td>1</td></tr>
 </tbody></table></div>
-<p>West wins. The relevant cards for the trick are then <code>ge(best) &amp; (0 - u64(ranked))</code> = <code>0x1f80000000000000</code> (<span class="red">&#9829;9</span> and every trump above it). If South's ruff had stood, <code>ranked</code> would be 0 and no ranks would matter. At the end of a trick ddfast uses the bottom of the winner's run:</p>
-<pre><code>const u64 Rt = (RUNOPT ? ge(nb) : ge(run_bottom(nb, H[nbw], all))) &amp; (0 - u64(nr));</code></pre>
-<p class="src">src/solver.cpp, follow(), K == 3</p>
-
+<p>West wins. The relevant cards for the trick are then <code>ge(best) &amp; (0 - u64(ranked))</code> = <code>0x1f80000000000000</code> (<span class="red">&#9829;9</span> and every trump above it). If South's ruff had stood, <code>ranked</code> would be 0 and no ranks would matter.</p>
 <h2>Make and unmake: one XOR and one nibble</h2>
 <p>Playing a card clears its bit in the hand and decrements one length nibble. Taking it back reverses both:</p>
 <pre><code>inline void play(int s, u64 c) { H[s] ^= c; LENS -= 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }
 inline void unplay(int s, u64 c) { H[s] ^= c; LENS += 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }</code></pre>
 <p class="src">src/solver.cpp (lead() and follow() write the same two lines inline)</p>
-<p>Nothing else needs updating. The cards in play, the top cards of each suit, the runs and the winners are all recomputed from the four words when they are needed. Compare the position that DDS maintains per node. ddfast's line-by-line port of DDS (<code>src/dds_port.hpp</code>) mirrors it as:</p>
-<pre><code>struct Pos {
-  unsigned short rank_in_suit[4][4];  // holdings now
-  unsigned short aggr[4];             // all hands' cards of each suit now
-  unsigned char length[4][4];
-  HighCardType winner[4], second_best[4];  // top two cards of each suit at the start of the trick
-  HighCardType third[4];                   // the third-best card of each suit now
-  ...</code></pre>
-<p class="src">src/dds_port.hpp</p>
-<p>ddfast never builds this struct in the search: its bounds, lead weights and second-hand quick tricks are DDS's, rewritten to work on the four words directly. Top cards come from a per-lane <code>lzcnt</code>, owners from bit tests, lengths from <code>LENS</code>. (The struct is used only by the checking builds, <code>-DVERIFY_ORDER</code> and <code>-DVERIFY_BOUNDS</code>, which compare every answer with the line-by-line port.)</p>
+<p>Nothing else needs updating. The cards in play, the top cards of each suit, the runs and the winners are all recomputed from the four words when they are needed. DDS, by contrast, keeps per-suit holdings, lengths and the top three cards of every suit up to date at each node. ddfast's bounds and lead weights are DDS's, rewritten to read the four words directly.</p>
 
-<h2>Table keys from the same words</h2>
-<p>A transposition-table entry records which cards mattered and who held them, not the cards themselves. ddfast builds the key from <code>LENS</code> and builds the pattern by compressing the hands with <code>pext</code> over the cards in play:</p>
-<pre><code>const u64 all = H[0] | H[1] | H[2] | H[3];
-const ddport::BitMask bm_(all);
-const u64 ewq = bm_.ext(H[1] | H[3]), swq = bm_.ext(H[2] | H[3]);
-const u64 key54 = lens48(LENS) | u64(L) &lt;&lt; 48 | u64(n) &lt;&lt; 50;</code></pre>
-<p class="src">src/solver.cpp, lead()</p>
-<ul>
-<li><b>key54</b>: the 48 bits of suit lengths (<code>lens48</code> keeps suits 1 to 3 of each seat), the leader and the number of cards per hand. Entries under one key share every hand's suit lengths, so a given position in the packed order is the same <em>relative</em> rank in every position under that key.</li>
-<li><b>ewq, swq</b>: two bits per card in play, in packed order. The ewq bit means East or West holds it, and the swq bit means South or West holds it. So North = 00, East = 10, South = 01, West = 11.</li>
-</ul>
-<p>Worked, spade lane only (packed low to high: 2 3 4 5 9 T J Q K A): ewq = <code>0x85</code> (bits for &#9824;2 W, &#9824;4 E, &#9824;Q E), swq = <code>0x43</code> (&#9824;2 W, &#9824;3 S, &#9824;J S).</p>
-<p>To store an entry, the relevant cards <code>Racc</code> are packed the same way. Because of fill_up they are the top block of each suit:</p>
-<pre><code>const u64 m = ddport::pext64(Racc, all);
-...
-const u64 mm = m | m &lt;&lt; 28;
-e[cnt] = (ewq | swq &lt;&lt; 28) &amp; mm;
-// Bit 55 + t: the entry decides target t (1..7); bit 63: the answer.
-const u64 dec = res ? (1ull &lt;&lt; target) - 1 : 0x7Full &amp; ~((1ull &lt;&lt; (target - 1)) - 1);
-e[8 + cnt] = mm | dec &lt;&lt; 56 | u64(res) &lt;&lt; 63;</code></pre>
-<p class="src">src/solver.cpp, tt_store (narrow entries, up to 7 cards a hand; wide entries for 8+ use three 52-bit words)</p>
-<p>For example, if the top three spades mattered, <code>m = pext(fill_up(&#9824;Q), all)</code> is <code>0x380</code> in the spade part, and <code>pdep(0x380, all)</code> gives back &#9824;AKQ. On a hit the stored mask is expanded onto the <em>current</em> position's cards, so a pattern learnt in one position names the corresponding cards in another:</p>
-<pre><code>R = fill_up(ddport::pdep64(bb &amp; 0xFFFFFFF, all));</code></pre>
-<p class="src">src/solver.cpp, tt_lookup</p>
-
-<h3>AVX-512: eight entries per compare</h3>
-<p>Entries sit in blocks of eight: eight owner patterns in one 64-byte line and their masks in the next. A lookup compares all eight with one masked compare and tests the "decides this target" bit:</p>
-<pre><code>inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
-  const __m512i vb = _mm512_load_si512(e + 8);
-  const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
-  return k &amp; _mm512_test_epi64_mask(vb, _mm512_set1_epi64((long long)dec));
-}</code></pre>
-<p class="src">src/solver.cpp</p>
-<p>The 4-card endgame table uses the same idea (<code>ddport::pmatch8</code>), and the two- and three-card table probes rank the owner strings with <code>pext</code> and look up a precomputed answer.</p>
-
-<h3>The per-suit vector lanes in native_order</h3>
-<p>DDS's lead-ordering weights depend on per-suit facts: lengths, the top three cards and who holds them. ddfast widens each 16-bit suit lane of a hand word to a 32-bit vector lane and computes all four suits at once:</p>
-<pre><code>auto ld = [](u64 h) { return _mm_cvtepu16_epi32(_mm_cvtsi64_si128((long long)h)); };
-auto hib = [](V v) { return _mm_srlv_epi32(_mm_set1_epi32(int(0x80000000u)), _mm_lzcnt_epi32(v)); };
-...
-const V X = ld(all), VL = ld(hl), VP = ld(hp), VA = ld(ha), VB = ld(hb);
-const V lenA = _mm_popcnt_epi32(VA), lenB = _mm_popcnt_epi32(VB), lenP = _mm_popcnt_epi32(VP);
-const V top1 = hib(X), X2 = _mm_xor_si128(X, top1), top2 = hib(X2), top3 = hib(_mm_xor_si128(X2, top2));
-const M w1L = tst(top1, VL), w1P = tst(top1, VP), w1A = tst(top1, VA), w1B = tst(top1, VB);</code></pre>
-<p class="src">src/solver.cpp, native_order (AVX-512VL)</p>
-<p>The per-card part then gets the candidate cards (the run heads) into one zmm register, one card per 32-bit lane. It bit-reverses each suit (<code>gf2p8affine</code> + <code>pshufb</code>) and compresses the bit positions (<code>vpcompressb</code>). The vector <code>native_order</code> is worth 1.09&#215; against a scalar loop (LOO).</p>
-<p>On Apple silicon the same per-suit part is written with Google Highway on 128-bit vectors (four 32-bit lanes, <code>native_order_hwy</code>): <code>PromoteTo</code> widens the lanes, <code>LeadingZeroCount</code> and a variable shift find the top cards, <code>PopulationCount</code> the lengths. A branch-free scalar loop over the cards then takes the place of the 16-lane compress and permutes.</p>
-
-<h2>Costs and limits</h2>
-<ul>
-<li><b>Instruction set.</b> The x86 build needs BMI2 (pext, pdep) and AVX-512. The README lists Zen 4/5 and Intel Ice Lake and later. <code>tables.hpp</code>: "Requires an x86-64 CPU with AVX-512 and BMI2 ... or AArch64 (Apple silicon; see port.hpp)."</li>
-<li><b>pext speed varies by CPU.</b> On Zen 1 and Zen 2, pext and pdep are microcoded and much slower than on Intel or Zen 3 and later. Those CPUs also lack AVX-512, so the x86 build does not run on them.</li>
-<li><b>Arm has no pext or pdep.</b> <code>port.hpp</code> emulates them a byte at a time through two 256&#215;256 tables (64 KB each, so both fit in a performance core's 128 KB L1). Each byte's output offset is a prefix sum of the mask's byte popcounts, from one vector popcount (Highway's <code>PopulationCount</code> on eight bytes) and a multiply. The README puts this at "about 50 instructions for what is one instruction on x86". The run finder avoids pext entirely on Arm and uses an add-and-carry trick on bit-reversed words instead:</li>
-</ul>
+<h2>It depends on pext and pdep</h2>
+<p>Packing the cards in play with <code>pext</code> and unpacking with <code>pdep</code> is what makes runs, table keys and lookups cheap. On x86 each is one instruction (BMI2; the build also needs AVX-512, so Zen 4/5 or Intel Ice Lake and later). Arm has neither. There ddfast emulates them a byte at a time through two 64 KB tables, about 50 instructions for what is one on x86, and the run finder avoids them with an add-and-carry trick on bit-reversed words:</p>
 <pre><code>inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
   const u64 gaps = __builtin_bitreverse64(~present &amp; ~GUARD_BITS);
   const u64 seeds = __builtin_bitreverse64((present &amp; ~mine) | GUARD_BITS) &lt;&lt; 1;
@@ -309,23 +235,20 @@ const M w1L = tst(top1, VL), w1P = tst(top1, VP), w1A = tst(top1, VA), w1B = tst
   return h;
 }</code></pre>
 <p class="src">port.hpp (AArch64 version)</p>
-<p>A carry started just below each card in play that is not mine (or the suit's guard) runs through the gaps left by played cards and stops at the next card in play. If that card is mine, it heads a run. The AVX-512 table matches become Highway compares on four 128-bit vectors of two lanes each, whose masks are narrowed to one 8-bit mask by truncation.</p>
+<p>A carry started just below each card in play that is not mine (or the suit's guard) runs through the gaps left by played cards and stops at the next card in play. If that card is mine, it heads a run.</p>
 
-<h2>Figures</h2>
+<h2>What it is worth</h2>
+<p>From the <a href="https://github.com/randalburns/ddfast/blob/main/docs/LOO.md">leave-one-out study</a> on one Zen 5 core, where ddfast as a whole is about 4.5&#215; DDS:</p>
 <div class="tablewrap"><table>
-<thead><tr><th>figure</th><th>value</th><th>source</th></tr></thead>
+<thead><tr><th>Measured</th><th>Speed</th></tr></thead>
 <tbody>
-<tr><td>Single problems, 600 random deals, one Zen 5 core</td><td class="num">271 vs 63 deals/s (4.3x)</td><td>README, Speed</td></tr>
-<tr><td>Full tables, 200 deals, one thread</td><td class="num">33.9 vs 133.8 ms (3.9x)</td><td>README, Speed</td></tr>
-<tr><td>Public set, ddfast vs DDS, one Zen 5 core</td><td class="num">15.9M vs 67.5M cycles/deal (4.25x)</td><td>LOO, Summary</td></tr>
-<tr><td>Nodes searched, public set</td><td class="num">82.92M (138.2k/deal)</td><td>LOO, Method</td></tr>
-<tr><td>Representation alone (ddfast running DDS's search)</td><td class="num">1.32x DDS (1.39x per node)</td><td>LOO, DDS's search</td></tr>
-<tr><td>&#8627; with software pext/pdep</td><td class="num">0.94x DDS (0.99x per node)</td><td>LOO, DDS's search</td></tr>
-<tr><td>Hardware pext/pdep inside full ddfast</td><td class="num">1.52x</td><td>LOO, Results</td></tr>
-<tr><td>DDS's lead weights / bounds rewritten on hand words</td><td class="num">1.24x / 1.07x</td><td>LOO, Results</td></tr>
-<tr><td>Apple M5 vs Zen 5 (Highway, byte-table pext/pdep)</td><td class="num">55M vs 40M instr.; 15.5M vs 16.1M cycles</td><td>README, macOS port</td></tr>
-<tr><td>Ratio to DDS on the Mac</td><td class="num">about 3x (3.1x single problems)</td><td>README</td></tr>
+<tr><td>The representation alone: ddfast running DDS's search, against DDS</td><td class="num">1.32&#215;</td></tr>
+<tr><td>&#8627; the same with software pext/pdep</td><td class="num">0.94&#215;</td></tr>
+<tr><td>Hardware pext/pdep inside full ddfast</td><td class="num">1.52&#215;</td></tr>
+<tr><td>DDS's lead weights rewritten on the hand words</td><td class="num">1.24&#215;</td></tr>
+<tr><td>DDS's bounds rewritten on the hand words</td><td class="num">1.07&#215;</td></tr>
 </tbody></table></div>
+<p>The representation pays only with fast <code>pext</code>/<code>pdep</code>. On an Apple M5, with the byte tables, ddfast runs about 55M instructions per deal against 40M on x86, yet takes about as many cycles (15.5M); it is 3.1&#215; DDS there.</p>
 
 </main>
 

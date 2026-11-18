@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Follow-Hand Rules</title>
-<meta name="description" content="How ddfast picks the first card for the second, third and fourth hands with a few cheap rules instead of DDS's per-card weights, with worked examples.">
+<meta name="description" content="How ddfast picks the first card for the second, third and fourth hands with a few cheap rules instead of DDS's per-card weights.">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
 /* Layout: one reading column (~68ch) with figures and code allowed to run wider; tables scroll inside their own box. */
@@ -119,178 +119,110 @@ li { margin: 4px 0; }
 <body>
 <main>
 <header>
-  <div class="eyebrow">ddfast &#183; src/solver.cpp &#183; move ordering</div>
+  <div class="eyebrow"><a href="./">ddfast design</a> &#183; move ordering</div>
   <h1>Follow-Hand Rules</h1>
-  <p class="lede">How ddfast chooses the first card for the second, third and fourth hands: a handful of cheap rules in place of DDS's per-card weights. This is the largest single thing ddfast adds to DDS's design.</p>
+  <p class="lede">The second, third and fourth hands pick their first card with a few cheap rules instead of DDS's per-card weights. It is the largest single thing ddfast adds to DDS.</p>
 </header>
 
 <div class="facts">
-  <div><b>1.66&#215;</b>slower with DDS's follow weights in place of the rules. LOO</div>
-  <div><b>&#8722;3.4%</b>fewer nodes with DDS's weights: they order about as well, at a far higher cost. LOO</div>
-  <div><b>0.35</b>of ddfast's 4.25&#215; lead over DDS, on a log scale: the largest share of any addition. LOO</div>
+  <div><b>1.66&#215;</b>slower with DDS's follow weights in place of the rules</div>
+  <div><b>&#8722;3.4%</b>nodes with DDS's weights: slightly better ordering, at a far higher cost</div>
+  <div><b>1 card</b>is chosen by rule; the rest are tried in a fixed order</div>
 </div>
 
-<p>Every excerpt is from <code>src/solver.cpp</code> on <code>main</code>, with the default settings. Every example below was checked by running ddfast's own <code>pick_follow</code> and <code>pick_void</code> on the hands shown. Figures come from <code>docs/LOO.md</code>, which measures what each part of ddfast is worth on one Zen 5 core.</p>
-
-<h2>Why the first card matters</h2>
-<p>ddfast, like DDS, asks yes/no questions ("can North-South take at least <i>t</i> tricks?") with an alpha-beta search. At a node where the side to play can refute the question, one good card is enough; every card tried before it is wasted work. Most of the work of move ordering is choosing that first card, and in a search of 140,000 nodes per deal, how much the choice costs matters as much as how good it is.</p>
-
+<h2>The idea</h2>
+<p>ddfast, like DDS, answers yes/no questions ("can North-South take at least <i>t</i> tricks?") with an alpha-beta search. Where the side to play can refute the question, one good card is enough, and every card tried before it is wasted. So move ordering is mostly about the first card, and in a search of about 140,000 nodes per deal, what that choice costs matters as much as how good it is.</p>
 <div class="cmp">
   <div><h4>DDS: weigh every card</h4><ol>
-    <li>For each of the hand's cards, compute a weight from the suit's top cards, who holds them, lengths, and the trick so far (DDS's <code>WeightAlloc</code> functions, one per hand and strain).</li>
+    <li>Compute a weight for each card from the suit's top cards, their owners, the lengths and the trick so far.</li>
     <li>Sort the cards by weight.</li>
     <li>Try them in that order.</li></ol></div>
-  <div><h4>ddfast: one rule-chosen card</h4><ol>
-    <li>Take one candidate per run of touching cards (<code>heads</code>, see <a href="hand-words.html">One word per hand</a>).</li>
-    <li>Pick the first card with a short decision list on the hand words.</li>
+  <div><h4>ddfast: one card by rule</h4><ol>
+    <li>Take one candidate per run of touching cards (see <a href="hand-words.html">One word per hand</a>).</li>
+    <li>Pick the first card with a short decision list.</li>
     <li>Try the rest in a fixed order: lowest first for second and fourth hand, highest first for third hand.</li></ol></div>
 </div>
-
-<pre><code>while (cand) {
-  const u64 c = in_suit ? pick_follow&lt;NT, K&gt;(cand, first, s, lane, best, bw)
-                        : pick_void&lt;NT, K&gt;(cand, first, s, best, bw);
-  cand ^= c;
-  ...</code></pre>
-<p class="src">src/solver.cpp, follow(). K is 1, 2 or 3 for the second, third and fourth hand; best and bw are the winning card so far and its seat.</p>
-<pre><code>if (!first) return K == 2 ? highest(cand) : lowest(cand);</code></pre>
-<p class="src">src/solver.cpp, pick_follow: every card after the first.</p>
-
-<p>Before any card is tried, a second-hand node from 4 cards up asks DDS's second-hand quick tricks, rewritten on the hand words (<code>native_second</code>): whether second hand's side can win this trick and reach its target at once. The rules below order the cards when that does not settle the node.</p>
-<p>The rules only change the order in which cards are tried. The answer is exact whatever the order, and the tests check every answer against DDS.</p>
+<p>The rules only change the order in which cards are tried, so the answers stay exact. In the examples, South leads, West plays second, North (dummy) third and East fourth; the highlighted card is the rule's pick. Each example was checked by running ddfast's own code on the hands shown.</p>
 
 <h2>Second hand</h2>
-<p>In every example South leads, West plays second, North (dummy) third and East fourth. Only the suit that matters is shown; the highlighted card is the one the rule picks. Second hand's rules, in the order the code applies them:</p>
+<p>The rules, in the order the code applies them:</p>
 <ol>
 <li>Cannot beat the card led: play low.</li>
-<li>Partner (playing last) holds 3+ cards with one above the lead, above dummy's top and above my top: play my lowest card above dummy's top, if I have one.</li>
+<li>Partner, playing last, holds three or more cards including one above the lead, dummy's top and my top: play my lowest card above dummy's top, if I have one.</li>
 <li>Partner can beat both the lead and dummy's top: play low.</li>
-<li>Dummy (third hand) is void: win with my lowest winner.</li>
+<li>Dummy is void: win with my lowest winner.</li>
 <li>Can beat dummy's top: play my lowest card that does.</li>
-<li>Partner holds nothing above the lead: cover with my lowest winner. Otherwise play low.</li>
+<li>Otherwise cover with my lowest winner if partner holds nothing above the lead, and play low if partner does.</li>
 </ol>
-<div class="ex"><span class="tag">Second hand</span><h4>Cannot beat the card led: play low</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;J 5 3</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;8 7 2</div><div class="seat e"><span class="who">East</span>&#9824;K 9 4</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;T</b></div></div>
-<p>West tries <span class="pickc">&#9824;2</span> first. <span class="order">Search order: &#9824;2, &#9824;8.</span></p>
-<p>No card of West's beats the ten, so the cheapest card goes first. The ♠8 and ♠7 touch (nothing between them is in play), so they are one candidate, ♠8.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Partner, playing last, beats the lead and dummy: play low</h4>
+<div class="ex"><span class="tag">Second hand</span><h4>Partner, playing last, beats the lead and dummy: play low</h4>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;J 5 3</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;Q 7 2</div><div class="seat e"><span class="who">East</span>&#9824;K 9</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;4</b></div></div>
 <p>West tries <span class="pickc">&#9824;2</span> first. <span class="order">Search order: &#9824;2, &#9824;7, &#9824;Q.</span></p>
-<p>East's king sits over dummy's jack, so the trick is East's to win. West keeps the queen. (East holds only two spades, so the next rule does not apply.)</p></div><div class="ex"><span class="tag">Second hand</span><h4>Partner is long and has a winner: play just above dummy</h4>
+<p>East's king sits over dummy's jack, so the trick is East's to win. West keeps the queen. (East holds only two spades, so rule 2 does not apply.)</p></div><div class="ex"><span class="tag">Second hand</span><h4>Partner is long and has a winner: play just above dummy</h4>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;J 5 3</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;Q 7 2</div><div class="seat e"><span class="who">East</span>&#9824;K 9 8</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;4</b></div></div>
 <p>West tries <span class="pickc">&#9824;Q</span> first. <span class="order">Search order: &#9824;Q, &#9824;2, &#9824;7.</span></p>
-<p>The same trick, but East holds three spades with the king above both the lead and dummy's jack, and above West's queen. West plays its lowest card that beats dummy's top.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Third hand is void: win as cheaply as possible</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span><span class="red">&#9829;</span>A 3 2</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;Q 9 2</div><div class="seat e"><span class="who">East</span>&#9824;6 5</div><div class="seat s"><span class="who">South</span>&#9824;J T</div><div class="trick">trick<br>S <b>&#9824;8</b></div></div>
-<p>West tries <span class="pickc">&#9824;9</span> first. <span class="order">Search order: &#9824;9, &#9824;2, &#9824;Q.</span></p>
-<p>Dummy cannot follow, and East cannot beat the eight. West wins with the ♠9 and keeps the queen.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Can beat dummy's top: lowest card that does</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;J 5</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;K Q 2</div><div class="seat e"><span class="who">East</span>&#9824;9 3</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;4</b></div></div>
-<p>West tries <span class="pickc">&#9824;K</span> first. <span class="order">Search order: &#9824;K, &#9824;2.</span></p>
-<p>The king and queen touch, so ♠K stands for both. It beats dummy's jack, and East cannot help.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Can beat the lead but not dummy, partner cannot beat the lead: cover</h4>
+<p>The same trick, but East holds three spades with the king above both the lead and dummy's jack, and above West's queen. West plays its lowest card that beats dummy's top.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Can beat the lead but not dummy, partner cannot beat the lead: cover</h4>
 <div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A 5</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;J 3 2</div><div class="seat e"><span class="who">East</span>&#9824;9 8 7</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;T</b></div></div>
 <p>West tries <span class="pickc">&#9824;J</span> first. <span class="order">Search order: &#9824;J, &#9824;3.</span></p>
-<p>West's jack covers the ten. If West ducks, dummy plays low and the ten wins with dummy's ace still to come; the cover forces the ace.</p></div><div class="ex"><span class="tag">Second hand</span><h4>Can beat the lead but not dummy, partner can: play low</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A 5</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;J 3 2</div><div class="seat e"><span class="who">East</span>&#9824;Q 8 7</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;T</b></div></div>
-<p>West tries <span class="pickc">&#9824;3</span> first. <span class="order">Search order: &#9824;3, &#9824;J.</span></p>
-<p>East's queen already beats the ten, so West ducks.</p></div>
-
-<pre><code>if (!win) return lowest(cand);                       // cannot beat the lead
+<p>West's jack covers the ten. If West ducks, dummy plays low and the ten wins with dummy's ace still to come; the cover forces the ace.</p></div>
+<pre><code>if (!win) return lowest(cand);                       // 1: cannot beat the lead
 const u64 pl = H[(s + 2) &amp; 3] &amp; lane;                 // partner, playing last
-const u64 top3 = nl ? highest(nl) : 0;
+const u64 top3 = nl ? highest(nl) : 0;                // dummy's top card
 const u64 bar = top3 &gt; best ? top3 : best;
 if (pl &amp;&amp; highest(pl) &gt; bar &amp;&amp; popc(pl) &gt;= 3 &amp;&amp; highest(pl) &gt; highest(cand)) {
   const u64 w3 = nl ? win &amp; above(highest(nl)) : 0;
-  if (w3) return lowest(w3);                         // just above dummy
+  if (w3) return lowest(w3);                         // 2: just above dummy
 }
-if (pl &amp;&amp; highest(pl) &gt; bar) return lowest(cand);  // partner wins: low
-if (!nl) return lowest(win);                         // dummy void: win cheaply
+if (pl &amp;&amp; highest(pl) &gt; bar) return lowest(cand);  // 3: partner wins, play low
+if (!nl) return lowest(win);                         // 4: dummy void
 u64 w2 = win &amp; above(highest(nl));
-if (!w2 &amp;&amp; !(H[(s + 2) &amp; 3] &amp; lane &amp; above(best))) return lowest(win);  // cover
-return w2 ? lowest(w2) : lowest(cand);</code></pre>
-<p class="src">src/solver.cpp, pick_follow for K == 1, simplified (the source's compile-time settings at their defaults).</p>
+if (!w2 &amp;&amp; !(H[(s + 2) &amp; 3] &amp; lane &amp; above(best))) return lowest(win);  // 6: cover
+return w2 ? lowest(w2) : lowest(cand);               // 5, or 6: low</code></pre>
+<p class="src">src/solver.cpp, pick_follow for the second hand, with the compile-time settings at their defaults</p>
 
 <h2>Third hand</h2>
-<p>Third hand plays after its partner (the leader) and one opponent, and before the other opponent.</p>
+<ol>
+<li>Partner (the leader) is winning: play low, unless fourth hand can beat partner's card. Then play the lowest card above fourth hand's top, or low if there is none.</li>
+<li>An opponent is winning: play the lowest card above fourth hand's top. Failing that, the lowest card that beats the current winner. Failing that, low.</li>
+</ol>
 <div class="ex"><span class="tag">Third hand</span><h4>Partner is winning and fourth hand can overtake: beat fourth hand</h4>
 <div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;A 4 2</div><div class="seat w"><span class="who">West</span>&#9824;&#8212;</div><div class="seat e"><span class="who">East</span>&#9824;K 5</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;Q</b><br>W <b>&#9824;3</b></div></div>
 <p>North tries <span class="pickc">&#9824;A</span> first. <span class="order">Search order: &#9824;A, &#9824;4, &#9824;2.</span></p>
-<p>South's queen would lose to East's king, so dummy wins now with the lowest card above the king. After the first choice, third hand tries its cards from the highest down.</p></div><div class="ex"><span class="tag">Third hand</span><h4>Partner is winning and fourth hand cannot overtake: play low</h4>
-<div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;A 4 2</div><div class="seat w"><span class="who">West</span>&#9824;&#8212;</div><div class="seat e"><span class="who">East</span>&#9824;J 5</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;Q</b><br>W <b>&#9824;3</b></div></div>
-<p>North tries <span class="pickc">&#9824;2</span> first. <span class="order">Search order: &#9824;2, &#9824;A, &#9824;4.</span></p>
-<p>East's jack cannot beat the queen; dummy keeps the ace.</p></div><div class="ex"><span class="tag">Third hand</span><h4>An opponent is winning: lowest card above fourth hand's top</h4>
-<div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;K Q 3</div><div class="seat w"><span class="who">West</span>&#9824;&#8212;</div><div class="seat e"><span class="who">East</span>&#9824;J 6</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;2</b><br>W <b>&#9824;T</b></div></div>
-<p>North tries <span class="pickc">&#9824;K</span> first. <span class="order">Search order: &#9824;K, &#9824;3.</span></p>
-<p>♠K (one run with the queen) beats West's ten and East's jack.</p></div><div class="ex"><span class="tag">Third hand</span><h4>Fourth hand holds the top card: lowest card that wins for now</h4>
+<p>South's queen would lose to East's king, so dummy wins now with the lowest card above the king. After the first choice, third hand tries its cards from the highest down.</p></div><div class="ex"><span class="tag">Third hand</span><h4>Fourth hand holds the top card: lowest card that wins for now</h4>
 <div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;K J 3</div><div class="seat w"><span class="who">West</span>&#9824;&#8212;</div><div class="seat e"><span class="who">East</span>&#9824;A 6</div><div class="seat s"><span class="who">South</span>&#9824;Q</div><div class="trick">trick<br>S <b>&#9824;2</b><br>W <b>&#9824;T</b></div></div>
 <p>North tries <span class="pickc">&#9824;J</span> first. <span class="order">Search order: &#9824;J, &#9824;K, &#9824;3.</span></p>
 <p>Nothing beats East's ace, so dummy plays the cheapest card that beats the ten, the jack. East must then spend the ace to win the trick.</p></div>
-<pre><code>if (pw) {                                         // partner (the leader) is winning
-  if (!nl) return lowest(cand);
-  u64 nh = highest(nl);
-  if (nh &lt; best) return lowest(cand);               // fourth hand cannot overtake
-  u64 w = cand &amp; above(nh);
-  return w ? lowest(w) : lowest(cand);              // beat fourth hand, or give up low
-}
-if (!win) return lowest(cand);
-if (!nl) return lowest(win);
-u64 w2 = win &amp; above(highest(nl));
-return w2 ? lowest(w2) : lowest(win);</code></pre>
-<p class="src">src/solver.cpp, pick_follow for K == 2, simplified.</p>
 
 <h2>Fourth hand</h2>
-<p>Fourth hand sees the whole trick, so one line decides: win as cheaply as possible, unless partner is already winning or nothing wins.</p>
-<div class="ex"><span class="tag">Fourth hand</span><h4>Can win: cheapest winning card</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;&#8212;</div><div class="seat w"><span class="who">West</span>&#9824;K</div><div class="seat e turn"><span class="who">East &#183; to play</span>&#9824;A Q 4 3</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;J</b><br>W <b>&#9824;2</b><br>N <b>&#9824;6</b></div></div>
-<p>East tries <span class="pickc">&#9824;Q</span> first. <span class="order">Search order: &#9824;Q, &#9824;4, &#9824;A.</span></p>
-<p>The queen is enough. After the first choice, fourth hand tries its cards from the lowest up.</p></div><div class="ex"><span class="tag">Fourth hand</span><h4>Partner is already winning: play low</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;&#8212;</div><div class="seat w"><span class="who">West</span>&#9824;2</div><div class="seat e turn"><span class="who">East &#183; to play</span>&#9824;A Q 4 3</div><div class="seat s"><span class="who">South</span>&#9824;&#8212;</div><div class="trick">trick<br>S <b>&#9824;J</b><br>W <b>&#9824;K</b><br>N <b>&#9824;6</b></div></div>
-<p>East tries <span class="pickc">&#9824;4</span> first. <span class="order">Search order: &#9824;4, &#9824;Q, &#9824;A.</span></p>
-<p>West's king holds the trick.</p></div>
-<pre><code>if (K == 3) return (pw || !win) ? lowest(cand) : lowest(win);</code></pre>
-<p class="src">src/solver.cpp, pick_follow</p>
+<p>Fourth hand sees the whole trick: it wins with its cheapest winning card, and plays low when partner is already winning or nothing wins.</p>
 
-<h2>Void hands: ruff or discard</h2>
-<p>A hand with no card in the suit led either ruffs or discards. In a trump contract (clubs are trumps in these examples; ddfast always keeps trumps in lane 3):</p>
+<h2>Void hands</h2>
+<p>A hand with no card in the suit led ruffs or discards (clubs are trumps in the examples):</p>
 <ul>
 <li><b>Second hand</b> ruffs with its lowest winning trump, unless third hand is void too and holds a higher trump. Then it ruffs above third hand's top trump if it can, and otherwise discards.</li>
-<li><b>Third hand</b>, with partner winning, ruffs only if fourth hand would beat partner's card (above fourth hand's top trump if fourth hand is void too).</li>
+<li><b>Third hand</b>, with partner winning, ruffs only if fourth hand would beat partner's card.</li>
 <li><b>Any hand</b> with an opponent winning ruffs with its lowest winning trump.</li>
-<li>Otherwise it <b>discards the lowest card of its longest side suit</b>, at no trumps too.</li>
+<li>Otherwise it <b>discards the lowest card of its longest side suit</b>.</li>
 </ul>
-<div class="ex"><span class="tag">Void, clubs trumps</span><h4>Second hand void: ruff low</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span><span class="red">&#9830;</span>Q 4 &nbsp;&#9827;9</div><div class="seat w turn"><span class="who">West &#183; to play</span><span class="red">&#9829;</span>7 &nbsp;&#9827;J 3</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>A 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>K</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>5</b></div></div>
-<p>West tries <span class="pickc">&#9827;3</span> first. <span class="order">Search order: &#9827;3, <span class="red">&#9829;</span>7, &#9827;J.</span></p>
-<p>Dummy can follow to diamonds, so no overruff is possible: the lowest trump wins the trick.</p></div><div class="ex"><span class="tag">Void, clubs trumps</span><h4>Third hand could overruff: discard instead</h4>
+<div class="ex"><span class="tag">Void, clubs trumps</span><h4>Third hand could overruff: discard instead</h4>
 <div class="deal"><div class="seat n"><span class="who">North</span><span class="red">&#9829;</span>5 &nbsp;&#9827;9</div><div class="seat w turn"><span class="who">West &#183; to play</span><span class="red">&#9829;</span>7 &nbsp;&#9827;7 3</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>A 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>K</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>5</b></div></div>
 <p>West tries <span class="pickc"><span class="red">&#9829;</span>7</span> first. <span class="order">Search order: <span class="red">&#9829;</span>7, &#9827;7.</span></p>
-<p>Dummy is void too and its ♣9 beats any trump West has, so West discards.</p></div><div class="ex"><span class="tag">Void, clubs trumps</span><h4>Second hand can ruff above third hand's trump</h4>
-<div class="deal"><div class="seat n"><span class="who">North</span><span class="red">&#9829;</span>5 &nbsp;&#9827;9</div><div class="seat w turn"><span class="who">West &#183; to play</span><span class="red">&#9829;</span>7 &nbsp;&#9827;Q 3</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>A 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>K</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>5</b></div></div>
-<p>West tries <span class="pickc">&#9827;Q</span> first. <span class="order">Search order: &#9827;Q, <span class="red">&#9829;</span>7, &#9827;3.</span></p>
-<p>The ♣Q beats dummy's ♣9, so West ruffs with it.</p></div><div class="ex"><span class="tag">Void, clubs trumps</span><h4>Third hand void, partner winning, fourth hand would beat it: ruff</h4>
+<p>Dummy is void too and its ♣9 beats any trump West has, so West discards.</p></div><div class="ex"><span class="tag">Void, clubs trumps</span><h4>Third hand void, partner winning, fourth hand would beat it: ruff</h4>
 <div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;Q &nbsp;&#9827;5</div><div class="seat w"><span class="who">West</span><span class="red">&#9830;</span>2</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>A 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>4</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>K</b><br>W <b><span class="red">&#9830;</span>6</b></div></div>
 <p>North tries <span class="pickc">&#9827;5</span> first. <span class="order">Search order: &#9827;5, &#9824;Q.</span></p>
-<p>East's ace would beat South's king, so dummy ruffs. (If East were void as well, dummy would ruff above East's highest trump.)</p></div><div class="ex"><span class="tag">Void, clubs trumps</span><h4>Third hand void, partner winning and safe: discard</h4>
-<div class="deal"><div class="seat n turn"><span class="who">North &#183; to play</span>&#9824;Q &nbsp;&#9827;5</div><div class="seat w"><span class="who">West</span><span class="red">&#9830;</span>2</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>8 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>4</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>K</b><br>W <b><span class="red">&#9830;</span>6</b></div></div>
-<p>North tries <span class="pickc">&#9824;Q</span> first. <span class="order">Search order: &#9824;Q, &#9827;5.</span></p>
-<p>East cannot beat the king, so dummy keeps its trump.</p></div><div class="ex"><span class="tag">Void, no trumps</span><h4>Discard: the lowest card of the longest side suit</h4>
+<p>East's ace would beat South's king, so dummy ruffs. (If East were void as well, dummy would ruff above East's highest trump.)</p></div><div class="ex"><span class="tag">Void, no trumps</span><h4>Discard: the lowest card of the longest side suit</h4>
 <div class="deal"><div class="seat n"><span class="who">North</span><span class="red">&#9829;</span>5 &nbsp;<span class="red">&#9830;</span>4</div><div class="seat w turn"><span class="who">West &#183; to play</span>&#9824;T 9 &nbsp;<span class="red">&#9829;</span>8 7 6 2 &nbsp;&#9827;K</div><div class="seat e"><span class="who">East</span><span class="red">&#9830;</span>A 3</div><div class="seat s"><span class="who">South</span><span class="red">&#9830;</span>K</div><div class="trick">trick<br>S <b><span class="red">&#9830;</span>5</b></div></div>
 <p>West tries <span class="pickc"><span class="red">&#9829;</span>2</span> first. <span class="order">Search order: <span class="red">&#9829;</span>2, <span class="red">&#9829;</span>8, &#9824;T, &#9827;K.</span></p>
 <p>West's hearts are its longest suit, so the ♥2 goes. The suit lengths come straight from the LENS word: four branch-free steps. ♥8, 7 and 6 are one run; ♥2 is its own, because North's ♥5 is still in play.</p></div>
 
 <h2>What the rules are worth</h2>
-<p>Replacing the rules with DDS's follow weights (ported line by line), all else equal, on the 600-deal public set and one Zen 5 core:</p>
+<p>Replacing the rules with DDS's follow weights (ported line by line), all else equal, on the 600-deal public set and one Zen 5 core (<a href="https://github.com/randalburns/ddfast/blob/main/docs/LOO.md">leave-one-out study</a>):</p>
 <div class="tablewrap"><table>
-<thead><tr><th>Follow ordering</th><th>Nodes</th><th>Cycles per deal</th><th>Source</th></tr></thead>
+<thead><tr><th>Follow ordering</th><th>Nodes</th><th>Time</th></tr></thead>
 <tbody>
-<tr><td>ddfast's rules</td><td class="num">82.9M</td><td class="num">15.9M</td><td>LOO</td></tr>
-<tr><td>DDS's follow weights</td><td class="num">&#8722;3.4%</td><td class="num">1.66&#215; slower</td><td>LOO</td></tr>
+<tr><td>ddfast's rules</td><td class="num">82.9M</td><td class="num">15.9M cycles per deal</td></tr>
+<tr><td>DDS's follow weights</td><td class="num">&#8722;3.4%</td><td class="num">1.66&#215; slower</td></tr>
 </tbody></table></div>
-<p>The weights choose slightly better first cards, but every follow node pays to weigh and sort all its cards; the rules cost a few bit operations. Leads are different: there ddfast keeps DDS's weights, rewritten on the hand words, because a lead's ordering pays for its cost.</p>
-
-<h2>Reimplementing it</h2>
-<ul>
-<li>Generate one candidate per run of touching cards from the hand words; equivalent cards are never tried twice.</li>
-<li>Give each follow position its own short decision list for the first card: win cheaply, duck when partner wins, cover when partner cannot, and do not ruff into an overruff.</li>
-<li>After the first card, try the rest in a fixed order (lowest first for second and fourth hand, highest first for third hand); do not weigh or sort.</li>
-<li>Keep DDS-quality ordering for leads, where it pays.</li>
-</ul>
+<p>The weights choose slightly better first cards, but every follow node pays to weigh and sort all its cards, and the rules cost a few bit operations. Leads are different: there ddfast keeps DDS's weights, rewritten on the hand words, because a lead's ordering is worth its cost.</p>
 </main>
 </body>
 </html>

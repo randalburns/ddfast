@@ -16,16 +16,60 @@ a { color: var(--link); }
 .card:hover { border-color: var(--link); }
 .card h2 { font-size: 1.15rem; margin: 0 0 .3rem; color: var(--link); }
 .card p { margin: 0; color: var(--muted); }
+h2.sec { font-size: 1.2rem; margin: 2.2rem 0 .5rem; }
+main > p { margin: .5rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .95rem; margin: .6rem 0 1rem; }
+th, td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.small { color: var(--muted); font-size: .9rem; }
 footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
 </style>
 </head>
 <body>
 <main>
 <h1>ddfast design</h1>
-<p class="lede">Illustrated explainers of the techniques behind <a href="https://github.com/randalburns/ddfast">ddfast</a>, a performance optimization of the <a href="https://github.com/dds-bridge/dds">DDS</a> double-dummy search, for programmers who know C++ and bridge basics.</p>
-<a class="card" href="hand-words.html"><h2>One word per hand</h2><p>Each hand as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners, one card per run of touching cards, the cards that decided a result) as a few bit operations. Worth 1.3-1.4&#215; over DDS on its own.</p></a>
-<a class="card" href="follow-hand.html"><h2>Follow-hand rules</h2><p>How the second, third and fourth hands pick their first card with a few cheap rules instead of DDS's per-card weights, with worked examples. The largest single addition: 1.66&#215;.</p></a>
-<a class="card" href="endgame-tables.html"><h2>Endgame tables</h2><p>Every 2- and 3-card ending as one lookup, and 4-card endings matched against learned card patterns, with examples from the real tables. Worth 1.30&#215; as a pair.</p></a>
+<p class="lede"><a href="https://github.com/randalburns/ddfast">ddfast</a> is an exact double-dummy solver for bridge. It gives the same answers as <a href="https://github.com/dds-bridge/dds">DDS</a>, 4 to 5 times faster on one core. These pages explain how, for programmers who know C++ and bridge basics.</p>
+
+<h2 class="sec">The search in brief</h2>
+<p>ddfast keeps DDS's approach. It asks a sequence of yes/no questions ("can North-South take at least <i>t</i> tricks?") and answers each with an alpha-beta search. Every answer comes with the <b>cards that decided it</b>, so a result is stored as a pattern over just those cards and reused for every position that shares them. DDS's bounds and its ordering of leads are kept too.</p>
+<p>What ddfast changes is how this runs: hands are single 64-bit words, the followers' cards are ordered by a few rules, and the last cards of each hand come from tables.</p>
+
+<h2 class="sec">The three ideas</h2>
+<a class="card" href="follow-hand.html"><h2>Follow-hand rules &#183; 1.66&#215;</h2><p>The second, third and fourth hands pick their first card with a few cheap rules instead of DDS's per-card weights. The largest single addition.</p></a>
+<a class="card" href="hand-words.html"><h2>One word per hand &#183; 1.52&#215;</h2><p>Each hand as one 64-bit word, and the card logic as a few bit operations. It pays because of two instructions, <code>pext</code> and <code>pdep</code>.</p></a>
+<a class="card" href="endgame-tables.html"><h2>Endgame tables &#183; 1.30&#215;</h2><p>Every 2- and 3-card ending is one lookup, and 4-card endings are matched against learned card patterns.</p></a>
+
+<h2 class="sec">Where the speed comes from</h2>
+<p>Each row is how much slower ddfast gets when that one thing is turned off and done DDS's way, or the plain way (one Zen 5 core, 600 deals). The parts overlap, so the factors do not multiply.</p>
+<table>
+<thead><tr><th>Turned off</th><th>Slowdown</th></tr></thead>
+<tbody>
+<tr><td><a href="follow-hand.html">Follow-hand rules</a></td><td class="num">1.66&#215;</td></tr>
+<tr><td><a href="hand-words.html">Hardware pext/pdep</a></td><td class="num">1.52&#215;</td></tr>
+<tr><td><a href="endgame-tables.html">Endgame tables</a> (both)</td><td class="num">1.30&#215;</td></tr>
+<tr><td>All AVX-512 code</td><td class="num">1.29&#215;</td></tr>
+<tr><td>DDS's lead ordering rewritten on hand words</td><td class="num">1.24&#215;</td></tr>
+<tr><td>DDS's bounds rewritten on hand words</td><td class="num">1.07&#215;</td></tr>
+<tr><td>Each transposition-table refinement</td><td class="num">1.00-1.06&#215;</td></tr>
+<tr><td>Fitted first guess</td><td class="num">1.02&#215;</td></tr>
+<tr><td>Huge pages, prefetch</td><td class="num">1.00-1.01&#215;</td></tr>
+</tbody>
+</table>
+<p class="small">From the <a href="https://github.com/randalburns/ddfast/blob/main/docs/LOO.md">leave-one-out study</a>. Run with DDS's own search, the hand representation alone is worth 1.3-1.4&#215;.</p>
+
+<h2 class="sec">Speed against DDS</h2>
+<table>
+<thead><tr><th></th><th>ddfast</th><th>DDS</th><th>Ratio</th></tr></thead>
+<tbody>
+<tr><td>One deal, one Zen 5 core (cycles)</td><td class="num">15.7-15.9M</td><td class="num">70.0-71.4M</td><td class="num">4.5&#215;</td></tr>
+<tr><td>Full table of 20 results, one core</td><td class="num">30.7 ms</td><td class="num">132.5 ms</td><td class="num">4.3&#215;</td></tr>
+<tr><td>Batch of deals, 8 threads</td><td class="num">1,419 /s</td><td class="num">272 /s</td><td class="num">5.2&#215;</td></tr>
+<tr><td>One deal, one Apple M5 core (cycles)</td><td class="num">15.5M</td><td class="num">48.5M</td><td class="num">3.1&#215;</td></tr>
+</tbody>
+</table>
+<p class="small">Every answer is checked against DDS. Details are in the <a href="https://github.com/randalburns/ddfast#speed">README</a>.</p>
+
 <footer>Source and documentation: <a href="https://github.com/randalburns/ddfast">github.com/randalburns/ddfast</a></footer>
 </main>
 </body>
