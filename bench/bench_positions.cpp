@@ -1,10 +1,10 @@
-// Times ddfast::solve_position on random positions of one size (ddclaim's generator, see
+// Times ddfast::solve_position on random positions of one size (the generator in
 // positions.hpp), one position at a time on one thread (pin it: taskset -c 0 ...).
 //
 // usage: bench_positions CARDS N SEED [ANSWERS_FILE] [dds]
 //
 // Prints cycles per position, one at a time and as one solve_positions() batch. ANSWERS_FILE gets North-South's tricks, one byte per position
-// (to compare with ddclaim_positions). With "dds", DDS (SolveBoard, one thread) is also timed
+// (to compare runs). With "dds", DDS (SolveBoard, one thread) is also timed
 // on the same positions and every answer is checked against it.
 #include <cstdio>
 #include <cstdlib>

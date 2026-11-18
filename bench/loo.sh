@@ -2,7 +2,7 @@
 # Leave-one-out study: the full solver with one design feature turned off at a time, timed
 # against the full solver and against DDS on the same deals.
 #
-# usage: sh bench/loo.sh OUTDIR [SET]        (from the repository root; DDCLAIM_DIR set)
+# usage: sh bench/loo.sh OUTDIR [SET]        (from the repository root; DDFAST_TABLES set)
 #        ONLY="name name" sh bench/loo.sh ...  only those variants
 #
 # Builds one variant per feature (in OUTDIR/b-NAME, with a -DSTATS twin for node counts) on

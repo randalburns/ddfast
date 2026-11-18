@@ -9,7 +9,7 @@
 // Problems are checked with solve() on this thread, then with solve_parallel() on LIST (default:
 // available_cpus()), then one at a time with solve_deal_parallel() on the first N of LIST
 // (--deal-threads N, default 8). Exit status 0 if everything is exact. The tables are loaded from
-// $DDCLAIM_DIR (default build/ddclaim), built there first if missing.
+// $DDFAST_TABLES (default build/tables), built there first if missing.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>

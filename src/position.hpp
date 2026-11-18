@@ -1,5 +1,5 @@
-// ddclaim: the position type and thread pinning shared with ddfast. The endgame tables and
-// their probes are in ddclaim/tables.hpp; ddclaim's own search is used only to build them.
+// The internal position type and thread pinning, shared by the search and the endgame tables
+// (tables.hpp).
 //
 // A position is the start of a trick with the same number of cards in every hand.
 #pragma once
@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ddclaim {
+namespace ddcore {
 
 struct Position {
   uint16_t hand[4][4];  // [seat][suit]; seats N E S W are 0..3, suits 0..3; bit r is rank 2 + r (bit 12 the ace)
@@ -19,4 +19,4 @@ struct Position {
 // fails. Used by ddfast's thread pools.
 bool pin_thread(int cpu);
 
-}  // namespace ddclaim
+}  // namespace ddcore

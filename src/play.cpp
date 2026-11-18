@@ -64,8 +64,8 @@ uint16_t heads(const Play& s, int x, uint16_t mask) {
   return out;
 }
 
-ddclaim::Position trick_start(const Play& s) {
-  ddclaim::Position q;
+ddcore::Position trick_start(const Play& s) {
+  ddcore::Position q;
   memcpy(q.hand, s.h, sizeof q.hand);
   q.trump = uint8_t(s.trump);
   q.leader = uint8_t(s.leader);

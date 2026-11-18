@@ -172,7 +172,7 @@ inline long long perf_read(int fd) {
 }
 #endif
 
-// The table directory for init(): $DDCLAIM_DIR if set (init() reads it), else the default.
+// The table directory for init(): $DDFAST_TABLES if set (init() reads it), else the default.
 inline void init_or_exit() {
   const double t0 = now();
   ddfast::init();

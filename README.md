@@ -19,7 +19,7 @@ run: positions are 64-bit hand words handled with bit operations and AVX-512 (Go
 the move ordering work on those words without DDS's per-node bookkeeping, the transposition
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
 guess, and the last 2, 3 and 4 cards of each hand are looked up in precomputed endgame tables
-(`extern/ddclaim`). [docs/NOTES.md](docs/NOTES.md) is the design and the full measurement
+(`src/tables.cpp`). [docs/NOTES.md](docs/NOTES.md) is the design and the full measurement
 history.
 
 ## Design explainers
@@ -138,7 +138,7 @@ too (from `proc_pid_rusage`); they are steadier than the time when other program
 
 ddfast needs two table files: the 3-card table (`t3_v2.bin`, 377 MB) and the
 4-card pattern table (`p4_v5.ent` and `.idx`, 758 MB). `init()` reads them from the directory
-it is given, else `$DDCLAIM_DIR`, else `build/ddclaim` under the current directory, and if
+it is given, else `$DDFAST_TABLES`, else `build/tables` under the current directory, and if
 they are missing builds them there first (once): about 10 seconds for the 3-card table (on 8 cores) and up
 to 170 seconds for the pattern table, on all cores, using up to about 5 GB of memory. So
 the first call of `init()` builds them, whatever it is asked to solve: running `bin/ddfast` on
@@ -156,7 +156,7 @@ in size; the answers are exact either way.
 
 ## The macOS port
 
-The bit and vector primitives live in one header, `extern/ddclaim/include/ddclaim/port.hpp`,
+The bit and vector primitives live in one header, `src/port.hpp`,
 with two implementations chosen at compile time:
 
 - **AVX-512 and BMI2** intrinsics where the CPU has them (x86-64).
@@ -268,7 +268,7 @@ number of threads at once, as may the calls of this section. The two parallel ca
 ## Tests and benchmarks
 
 ```sh
-export DDCLAIM_DIR=...            # if the tables are not in build/ddclaim
+export DDFAST_TABLES=...            # if the tables are not in build/tables
 bin/test_ddfast                  # quick: public set, 100 random deals, 10 tables; each also in parallel
 bin/test_ddfast random 3000 1    # 3,000 random deals against DDS SolveBoard
 bin/test_ddfast tables 200 1     # 200 full tables against DDS CalcDDtable
@@ -296,11 +296,13 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/api.cpp` | the interface and the thread pool |
 | `src/play.cpp` | play positions, card results, play analysis, targets and par |
 | `src/guess_*.inc` | fitted first guesses of the result |
-| `extern/ddclaim` | the endgame tables: their probes (`include/ddclaim/tables.hpp`), the code that builds them, and the AVX-512 / Highway primitives (`include/ddclaim/port.hpp`) |
+| `src/tables.hpp`, `src/tables.cpp` | the endgame tables: their layout and probes, and the code that loads and builds them |
+| `src/port.hpp` | the bit and vector primitives: AVX-512 and BMI2 on x86-64, Google Highway on Apple silicon |
 | `extern/dds` | DDS (submodule), for tests and benchmarks only |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
 | `docs/LOO.md` | what each part of the design is worth (leave-one-out study) |
+| `docs/TABLES_NOTES.md` | the original design notes of the endgame tables |
 
 ## License
 

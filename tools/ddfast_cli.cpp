@@ -2,7 +2,7 @@
 //
 // usage: ddfast [options] [file ...]        (no file: standard input)
 //   -t, --threads N   solve on N worker threads (default 1; 0: every available CPU)
-//   -d, --dir DIR     the table directory (default $DDCLAIM_DIR, else build/ddclaim)
+//   -d, --dir DIR     the table directory (default $DDFAST_TABLES, else build/tables)
 //   -s, --strain X    default strain for lines that give none: S H D C or N
 //   -l, --declarer X  default declarer for lines that give none: N E S W
 //

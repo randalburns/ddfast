@@ -1,4 +1,4 @@
-// Portability layer: the bit and vector operations ddclaim (and ddfast) use, in two
+// Portability layer: the bit and vector operations ddfast uses, in two
 // implementations: x86-64 (BMI2 and AVX-512 intrinsics, the original instructions) and AArch64
 // (Apple silicon: the vector code written with Google Highway, static dispatch on 128-bit
 // vectors, and table lookups or bit tricks in place of pext/pdep, which Arm lacks).
@@ -9,20 +9,20 @@
 
 #if defined(__x86_64__)
 #include <immintrin.h>
-#define DDCLAIM_X86 1
-#define DDCLAIM_ARM 0
+#define DDPORT_X86 1
+#define DDPORT_ARM 0
 #elif defined(__aarch64__)
 #include <hwy/highway.h>
-#define DDCLAIM_X86 0
-#define DDCLAIM_ARM 1
+#define DDPORT_X86 0
+#define DDPORT_ARM 1
 #else
-#error "ddclaim needs x86-64 (AVX-512, BMI2) or AArch64"
+#error "ddfast needs x86-64 (AVX-512, BMI2) or AArch64"
 #endif
 
 namespace ddport {
 
 typedef uint64_t u64;
-#if DDCLAIM_ARM
+#if DDPORT_ARM
 namespace hn = hwy::HWY_NAMESPACE;
 #endif
 
@@ -35,7 +35,7 @@ inline void prefetch(const void* p) { __builtin_prefetch(p, 0, 3); }
 #endif
 // The pause in a spin-wait loop.
 inline void cpu_relax() {
-#if DDCLAIM_X86
+#if DDPORT_X86
   _mm_pause();
 #else
   __builtin_arm_yield();
@@ -43,7 +43,7 @@ inline void cpu_relax() {
 }
 // A cheap, steadily increasing tick count (for ratios of time spent, not for wall time).
 inline u64 ticks() {
-#if DDCLAIM_X86
+#if DDPORT_X86
   return __rdtsc();
 #else
   return __builtin_arm_rsr64("cntvct_el0");
@@ -54,7 +54,7 @@ inline u64 ticks() {
 // replaces BMI2 pext/pdep on x86 by the byte-table code used on Arm; ABL_SCALAR_TT,
 // ABL_SCALAR_PMATCH and ABL_SCALAR_PICK replace the AVX-512 match8, pmatch8 and best_key
 // by scalar loops.
-#if DDCLAIM_X86 && !defined(ABL_SOFT_BITS)
+#if DDPORT_X86 && !defined(ABL_SOFT_BITS)
 
 inline u64 pext64(u64 x, u64 m) { return _pext_u64(x, m); }
 inline u64 pdep64(u64 x, u64 m) { return _pdep_u64(x, m); }
@@ -99,7 +99,7 @@ inline const ByteTables g_bytes;
 
 // Byte k: the number of mask bits in bytes 0 .. k-1.
 __attribute__((always_inline)) inline u64 byte_offsets(u64 m) {
-#if DDCLAIM_ARM
+#if DDPORT_ARM
   const hn::Full64<uint8_t> d8;
   const hn::Full64<uint64_t> d64;
   const u64 c = hn::GetLane(hn::BitCast(d64, hn::PopulationCount(hn::BitCast(d8, hn::Set(d64, m)))));
@@ -151,7 +151,7 @@ inline u64 lane_nibbles(u64 x, int k) {
 
 #endif
 
-#if DDCLAIM_X86
+#if DDPORT_X86
 
 // Bytes 0..7 of x reordered by ctl[0..7] (an index 0..7, or 0x80 for a zero byte). ctl is
 // 16-byte aligned.
@@ -209,7 +209,7 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
 #endif
 }
 
-#else  // DDCLAIM_ARM: Highway
+#else  // DDPORT_ARM: Highway
 
 inline u64 shuf8(u64 x, const uint8_t* ctl) {
   const hn::Full64<uint8_t> d8;
@@ -271,7 +271,7 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
 // 16s+15. `present` is the set of cards still in play; `mine` is a subset of it.
 constexpr u64 GUARD_BITS = 0x8000800080008000ull;
 
-#if DDCLAIM_X86
+#if DDPORT_X86
 // One card per run of touching cards (the top one), and the heads with another of mine
 // directly below in play (the run has more cards).
 inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
@@ -321,7 +321,7 @@ inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
 
 }  // namespace ddport
 
-// Stack switching for the coroutines (ddclaim's batch search, ddfast's NCTX > 1 build):
+// Stack switching for the coroutines (the table builder's batch search, the NCTX > 1 build):
 // DDPORT_DEFINE_CTX_SWITCH(name) defines
 //   extern "C" void name(void** save_sp, void* load_sp);
 // which saves the callee-saved registers on the current stack, stores the stack pointer in
@@ -329,7 +329,7 @@ inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
 // prepares a new stack whose first switch to it enters `entry`.
 #define DDPORT_STR2(x) #x
 #define DDPORT_STR(x) DDPORT_STR2(x)
-#if DDCLAIM_X86
+#if DDPORT_X86
 #define DDPORT_DEFINE_CTX_SWITCH(name)                                                          \
   extern "C" void name(void** save_sp, void* load_sp);                                          \
   asm(".text\n.p2align 4\n.globl " #name "\n.type " #name ",@function\n" #name ":\n"            \
@@ -366,7 +366,7 @@ namespace ddport {
 // `top` is the (16-byte aligned) end of a new stack; returns its first saved stack pointer.
 inline void* init_stack(void* top, void (*entry)()) {
   void** t = static_cast<void**>(top);
-#if DDCLAIM_X86
+#if DDPORT_X86
   t[-2] = reinterpret_cast<void*>(entry);  // the return address, 16-byte aligned
   for (int k = 3; k <= 8; k++) t[-k] = nullptr;
   return t - 8;

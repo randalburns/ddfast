@@ -190,7 +190,7 @@ trump and no-trump weight functions).
 ## Reproducing
 
 ```sh
-export DDCLAIM_DIR=/path/to/tables
+export DDFAST_TABLES=/path/to/tables
 sh scripts/build.sh && XFLAGS=-DSTATS OUT=bin-stats sh scripts/build.sh
 sh bench/loo.sh OUTDIR                    # about an hour: two builds per variant, then timing
 ONLY="no_guess no_skip" sh bench/loo.sh OUTDIR   # rerun a few variants

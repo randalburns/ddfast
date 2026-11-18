@@ -24,7 +24,7 @@
 
 namespace {
 
-void begin_deal(const ddclaim::Position& p) {
+void begin_deal(const ddcore::Position& p) {
   ensure_state();
   if (!S->tt.dir) S->tt.alloc();
   const int tr = p.trump;
@@ -124,7 +124,7 @@ struct DealPool {
   std::vector<int> cpus;
   std::vector<std::thread> threads;
   // The deal and the question.
-  ddclaim::Position pos{};
+  ddcore::Position pos{};
   uint64_t deal_id = 0;
   int target = 0, L = 0, nlead = 0;
   LeadState ls[16];
@@ -199,7 +199,7 @@ struct DealPool {
     nodes.fetch_add(g_mnodes - n0, std::memory_order_relaxed);
   }
   void helper(int w, uint64_t seen) {
-    if (cpus[w] >= 0) ddclaim::pin_thread(cpus[w]);
+    if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
     ensure_state();
     g_hot.stop = &g_never_stop;
     for (;;) {
@@ -292,9 +292,9 @@ DealPool& deal_pool() {
 
 namespace ddfast::detail {
 
-int solve_deal_parallel(const ddclaim::Position& p, const int* cpus, int ncpu, unsigned long long* lead_nodes) {
+int solve_deal_parallel(const ddcore::Position& p, const int* cpus, int ncpu, unsigned long long* lead_nodes) {
   static std::once_flag once;
-  std::call_once(once, [] { ddclaim::tables::attach(); });
+  std::call_once(once, [] { ddcore::tables::attach(); });
   DealPool& P = deal_pool();
   if (ncpu < 1) ncpu = 1;
   if (P.cpus.size() != size_t(ncpu) || !std::equal(P.cpus.begin(), P.cpus.end(), cpus)) {

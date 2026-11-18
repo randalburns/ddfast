@@ -3,7 +3,7 @@
 // Given four 13-card hands, a strain and a declarer, ddfast returns the number of tricks
 // declarer's side takes with best play by both sides, the same answer as DDS's SolveBoard
 // (target -1) or CalcDDtable, several times faster on one core. It finishes endings of 2, 3
-// and 4 cards a hand in the tables of ddclaim (extern/ddclaim), which init() loads.
+// and 4 cards a hand in endgame tables, which init() loads.
 //
 // Conventions: seats N E S W are 0..3; suits S H D C are 0..3 (as in DDS); a holding is a
 // 13-bit mask, bit r for rank 2 + r (bit 12 the ace); strains 0..3 are the suits, 4 no trumps.
@@ -49,9 +49,9 @@ struct Position {
   uint8_t leader;  // 0..3
 };
 
-// Loads the endgame tables from `table_dir`, or if it is null or empty from $DDCLAIM_DIR, or
-// else from build/ddclaim under the current directory. Missing tables are built there first
-// by ddclaim (the three-card table and the four-card pattern table: about 380 MB and 760 MB
+// Loads the endgame tables from `table_dir`, or if it is null or empty from $DDFAST_TABLES, or
+// else from build/tables under the current directory. Missing tables are built there first
+// (the three-card table and the four-card pattern table: about 380 MB and 760 MB
 // of files; a few minutes on many threads, once). The tables use about 1.2 GB of memory.
 void init(const char* table_dir = nullptr);
 
