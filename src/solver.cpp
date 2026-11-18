@@ -2017,7 +2017,7 @@ struct alignas(64) SpinLock {
   void lock() {
     for (;;) {
       if (!f.exchange(true, std::memory_order_acquire)) return;
-      while (f.load(std::memory_order_relaxed)) _mm_pause();
+      while (f.load(std::memory_order_relaxed)) ddport::cpu_relax();
     }
   }
   void unlock() { f.store(false, std::memory_order_release); }

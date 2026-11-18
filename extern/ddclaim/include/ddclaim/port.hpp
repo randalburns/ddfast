@@ -29,6 +29,22 @@ inline void prefetch(const void*) {}
 #else
 inline void prefetch(const void* p) { __builtin_prefetch(p, 0, 3); }
 #endif
+// The pause in a spin-wait loop.
+inline void cpu_relax() {
+#if DDCLAIM_X86
+  _mm_pause();
+#else
+  __builtin_arm_yield();
+#endif
+}
+// A cheap, steadily increasing tick count (for ratios of time spent, not for wall time).
+inline u64 ticks() {
+#if DDCLAIM_X86
+  return __rdtsc();
+#else
+  return __builtin_arm_rsr64("cntvct_el0");
+#endif
+}
 
 // Leave-one-out switches (bench/loo.sh; the defaults are the normal build): ABL_SOFT_BITS
 // replaces BMI2 pext/pdep on x86 by the byte-table code used on Arm; ABL_SCALAR_TT,
