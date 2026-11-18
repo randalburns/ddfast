@@ -205,8 +205,8 @@ int range_checks(const unsigned remain[4][4], int trump, int first, const int ts
 
 }  // namespace
 
-void ensure_init(const char* table_dir) {
-  std::call_once(g_init_once, [&] { ddfast::init(table_dir); });
+void ensure_init(const char* table_dir, bool map_tables) {
+  std::call_once(g_init_once, [&] { ddfast::init(table_dir, map_tables); });
 }
 
 const char* error_text(int code) {

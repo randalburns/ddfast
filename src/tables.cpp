@@ -1048,9 +1048,29 @@ void minimize_t3(int cfg) {
   }
 }
 
+// Whether the table files are mapped (shared between processes) rather than read into this
+// process's own memory; set by init_tables().
+bool g_map_files = false;
+void* map_file(const std::string& path, size_t bytes, bool writable);
+
+// The three-card table file mapped read-only, or null if it is missing or not the right size.
+// A probe loads 8 bytes at a 5-byte entry, so up to 3 bytes past the last one: they are in
+// the mapping's last page (which the file does not fill, for any page size up to 64 KB).
+static_assert(T3_BYTES % 65536 != 0 && T3_BYTES % 65536 <= 65536 - 3 && T3_BYTES % 4096 != 0 && T3_BYTES % 4096 <= 4096 - 3 &&
+              T3_BYTES % 16384 != 0 && T3_BYTES % 16384 <= 16384 - 3);
+uint8_t* map_t3() {
+  struct stat st;
+  if (stat(t3_path().c_str(), &st) != 0 || size_t(st.st_size) != T3_BYTES) return nullptr;
+  return static_cast<uint8_t*>(map_file(t3_path(), T3_BYTES, false));
+}
+
 void build_t3() {
   build_t3_tables();
   enum_cfg3();
+  if (g_map_files && (g_t3 = map_t3())) {
+    g_use3 = true;
+    return;
+  }
   const size_t bytes = (T3_BYTES + 16 + (2u << 20) - 1) & ~size_t((2u << 20) - 1);
   g_t3 = static_cast<uint8_t*>(aligned_alloc(2u << 20, bytes));
 #ifdef MADV_HUGEPAGE
@@ -1097,6 +1117,8 @@ void build_t3() {
       else remove(tmp.c_str());
     }
   }
+  if (g_map_files)  // just built (or the mapping failed above): use the file if it can be mapped now
+    if (uint8_t* m = map_t3()) free(g_t3), g_t3 = m;
   g_use3 = true;
 }
 
@@ -1280,7 +1302,8 @@ void* map_file(const std::string& path, size_t bytes, bool writable) {
     return nullptr;
   }
   if (at > base) munmap(base, size_t(at - base));
-  char* end = at + ((bytes + 4095) & ~size_t(4095));
+  const size_t page = size_t(sysconf(_SC_PAGESIZE));
+  char* end = at + ((bytes + page - 1) & ~(page - 1));
   if (base + span > end) munmap(end, size_t(base + span - end));
 #ifdef DDFAST_TABLE_NO_POPULATE  // macOS: read the file in now, as MAP_POPULATE does
   if (!writable) {
@@ -1434,8 +1457,9 @@ bool p_load(int lv) {
   if (!ok) return false;
   pt.lines = head[2];
   // By default the file is read into huge pages, which is about 9% faster to search than
-  // mapping it (this kernel gives file mappings 4 KB pages). DDFAST_TABLE_MAP=1 maps it instead.
-  if (!getenv("DDFAST_TABLE_MAP")) {
+  // mapping it (this kernel gives file mappings 4 KB pages). init_tables() can ask for the
+  // mapping instead, which processes share.
+  if (!g_map_files) {
     u64* m = static_cast<u64*>(alloc_huge(pt.lines * 64 + 64));
     FILE* g = fopen(p_path(lv, "ent").c_str(), "rb");
     ok = g && fread(m, 64, pt.lines, g) == pt.lines;
@@ -1580,8 +1604,10 @@ std::string table_dir() {
   return d && *d ? d : "build/tables";
 }
 
-void init_tables(const char* dir, int pattern_levels) {
+void init_tables(const char* dir, int pattern_levels, bool map_files) {
   if (dir && *dir) g_dir = dir;
+  const char* e = getenv("DDFAST_TABLE_MAP");
+  g_map_files = map_files || (e && *e && strcmp(e, "0") != 0);
   build_t2();
   build_t3();
   build_p(pattern_levels);

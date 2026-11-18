@@ -8,8 +8,9 @@
 
 namespace ddfast::detail {
 
-// Loads the endgame tables (building any that are missing); dir may be null.
-void init(const char* dir);
+// Loads the endgame tables (building any that are missing); dir may be null. map_tables: see
+// ddfast::init().
+void init(const char* dir, bool map_tables);
 // tricks[i] = North-South's tricks in positions[i] (ddcore::Position: hands, trump, leader;
 // 13 cards a hand here). On the calling thread.
 void solve(const ddcore::Position* positions, size_t n, uint8_t* tricks);

@@ -151,6 +151,14 @@ echo 'N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85' | b
 
 The 2-card table is not a file: it is built in memory by every `init()`, in a moment.
 
+**Many processes on one machine.** By default each process reads the two files into its own
+memory, 1.1 GB each. To share one copy between all processes that use the same files, map
+them instead: `ddfast::init(dir, true)` in C++, `ddfast.init(map_tables=True)` in Python, or
+`DDFAST_TABLE_MAP=1` in the environment (which needs no change to the program). A process then
+keeps about 60 MB of its own and starts without copying the tables. Mapped tables search as
+fast as read ones on Apple silicon; on Linux they can be several percent slower where the
+kernel gives file mappings 4 KB pages only, which is why mapping is not the default.
+
 The pattern table is filled for a fixed time, so tables built on different machines can differ
 in size; the answers are exact either way.
 

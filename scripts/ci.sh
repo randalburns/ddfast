@@ -18,3 +18,6 @@ RUN=${RUN:-}
 $RUN bin/test_ddfast ${TESTS:-quick}
 # shellcheck disable=SC2086
 $RUN bin/test_play ${PLAY:-100 1}
+# The same with the table files mapped (shared between processes) instead of read in.
+# shellcheck disable=SC2086
+DDFAST_TABLE_MAP=1 $RUN bin/test_play ${PLAY:-100 1}
