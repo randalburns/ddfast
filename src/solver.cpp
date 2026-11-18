@@ -2885,6 +2885,11 @@ int solve_one(int n, int L, int first) {
 #else
   int t = first > 0 ? first : guess<NT>(n, L);
 #endif
+  if (first < 0) {  // a prior value -first - 1 (the same side's result from another leader): v or v + 1 by the model
+    const int v = -first - 1;
+    t = t > v ? v + 1 : v;
+    t = t < 1 ? 1 : t > n ? n : t;
+  }
   if (n == 13 && first <= 0) t = t < 1 ? 1 : t > 13 ? 13 : t;
 #ifdef STATS
   const int t0 = t;
@@ -3072,6 +3077,9 @@ void run_batch(const ddcore::Position* positions, size_t count, uint8_t* tricks,
 
 }  // namespace
 
+#ifndef TPGUESS
+#define TPGUESS 1
+#endif
 #ifndef DDF_PAR
 namespace ddfast::detail {
 
@@ -3123,9 +3131,34 @@ void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) {
   if (!S->tt.dir) S->tt.alloc();  // the default state's table is allocated on first use
   for (int strain = 0; strain < 5; strain++) {
     p.trump = uint8_t(strain);
-    for (int d = 0; d < 4; d++) {
+    int v[4] = {-1, -1, -1, -1};  // North-South's tricks, by declarer
+    for (int di = 0; di < 4; di++) {
+#if TPGUESS
+      // East, West, South, then North lead: South's first target then comes from both
+      // East-West results.
+      const int d = (0x3120 >> (4 * di)) & 15;
+#else
+      const int d = di;
+#endif
       p.leader = uint8_t((d + 1) & 3);
-      const int ns = ::solve_position(p, 0, d > 0);
+      // First targets from the results already found (they only choose the questions, so
+      // the answers stay exact). The same side's other declarer (the other defender leads)
+      // usually gives the same tricks (93%): that value and one more or one less, by the
+      // model. North-South on lead almost always take as many tricks as when either East or
+      // West leads, or one more (96%).
+      int first = 0;
+#if TPGUESS
+      if (v[d ^ 2] >= 0) first = -1 - v[d ^ 2];
+      else if (d & 1) {
+        const int o = std::max(v[0], v[2]);
+        if (o >= 0) first = std::min(o + 1, 13);
+      } else {
+        const int o = std::max(v[1], v[3]);
+        if (o >= 0) first = std::max(o, 1);
+      }
+#endif
+      const int ns = ::solve_position(p, first, di > 0);
+      v[d] = ns;
       tricks[strain][d] = uint8_t((d & 1) ? popc(H[0]) - ns : ns);
     }
   }
