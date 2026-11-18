@@ -225,7 +225,7 @@ void run_round(Pool& P, size_t n, const uint32_t* order, int ncpu, std::vector<W
 
 }  // namespace
 
-void init(const char* table_dir) { detail::init(table_dir); }
+void init(const char* table_dir, bool map_tables) { detail::init(table_dir, map_tables); }
 
 void solve(const Problem* problems, size_t n, uint8_t* tricks) {
   std::vector<ddcore::Position> ps(n);

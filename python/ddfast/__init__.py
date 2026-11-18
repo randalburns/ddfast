@@ -9,7 +9,9 @@ written against dds3::
 
 The endgame tables (about 1.2 GB) are loaded on first use from ``$DDFAST_TABLES`` (or
 ``build/tables`` under the current directory), and built there first if missing; call
-``ddfast.init(path)`` to choose the directory.
+``ddfast.init(path)`` to choose the directory. Each process reads its own copy; when many
+processes run on one machine, ``ddfast.init(map_tables=True)`` (or ``DDFAST_TABLE_MAP=1`` in
+the environment) maps the files instead, and the processes share one copy.
 """
 from ._ddfast import SolverContext, calc_all_tables_pbn, init, solve_board_pbn, solve_boards_pbn
 from . import dds3

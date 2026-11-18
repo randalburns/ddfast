@@ -134,7 +134,10 @@ std::string table_dir();
 // table_dir()). Building the three-card table takes about a minute on many threads; the
 // pattern table is filled for up to DDFAST_TABLE_SECONDS (170 by default). Call once, from one
 // thread, before any probe.
-void init_tables(const char* dir, int pattern_levels);
+// map_files (or DDFAST_TABLE_MAP set to anything but 0): map the two files read-only instead
+// of reading them into this process's memory, so that all processes using the same files share
+// one copy; see ddfast::init().
+void init_tables(const char* dir, int pattern_levels, bool map_files = false);
 
 // Copies the state of the tables loaded by init_tables() (about 17 KB; the tables themselves
 // are pointed to, not copied).
