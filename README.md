@@ -39,16 +39,31 @@ The pages are published from the `gh-pages` branch.
 
 ## Speed
 
-On one core of an AMD Ryzen AI 9 HX 370 (CPU 0, a Zen 5 core), against DDS at commit
-5caf076e (develop) built with the same compiler and flags:
+On an AMD Ryzen AI 9 HX 370 (Zen 5) laptop, using only its four performance cores (CPUs 0-3,
+SMT siblings 12-15), against DDS at commit 5caf076e (develop) built with the same compiler and
+flags. Every answer is checked against DDS.
+
+One core (CPU 0):
 
 | | ddfast | DDS | ratio |
 |---|---|---|---|
-| single problems (600 random deals, SolveBoard) | 271 deals/s | 63 deals/s | 4.3x |
-| full tables (200 random deals, CalcDDtable on one thread) | 33.9 ms/table | 133.8 ms/table | 3.9x |
+| single problems (`tests/data/public.set`, 600 deals, SolveBoard; cycles per deal, 3 alternating runs) | 15.7-15.9M | 70.0-71.4M | 4.5x |
+| full tables (100 random deals, CalcDDtable on one thread) | 30.7 ms/table | 132.5 ms/table | 4.3x |
 
-On the 600 deals of `tests/data/public.set` ddfast takes 16.1M cycles per deal (313 deals/s).
-The parallel calls spread a batch over a pinned thread pool; see `bench/`.
+Batches (`bench/bench_batch.cpp`: SolveAllBoards and CalcAllTables against `solve_parallel` and
+`solve_tables_parallel`, same deals, same thread count, best of 3; the 600 deals of the public
+set and tables of its first 120):
+
+| | threads | ddfast | DDS | ratio |
+|---|---|---|---|---|
+| deals | 4 (CPUs 0-3) | 1,018 deals/s | 207 deals/s | 4.9x |
+| tables | 4 (CPUs 0-3) | 122.0 tables/s | 27.7 tables/s | 4.4x |
+| deals | 8 (CPUs 0-3, 12-15) | 1,419 deals/s | 272 deals/s | 5.2x |
+| tables | 8 (CPUs 0-3, 12-15) | 165.3 tables/s | 34.8 tables/s | 4.75x |
+
+ddfast pins one worker per CPU and hands out one problem at a time; DDS's pool is confined to
+the same CPUs with `taskset` but its threads are not pinned individually. A laptop's clock moves
+a lot under load (3.0-4.2 GHz here), so the cycle counts are the steadier figure.
 
 Positions with fewer cards are faster still, relative to DDS (random trick starts, one at a
 time, `bench/positions_vs_ddclaim.sh`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
@@ -297,6 +312,7 @@ taskset -c 0 bin/bench_solve set tests/data/public.set     # cycles per deal on 
 bin/bench_solve parallel tests/data/public.set auto        # on the thread pool
 bin/bench_solve deal tests/data/public.set 3 1t 0-3        # latency of one deal: solve() vs 4 cores
 bin/bench_tables 200 4242                                  # tables against DDS CalcDDtable
+taskset -c 0-3 bin/bench_batch tests/data/public.set 120 4 0-3   # batches vs SolveAllBoards / CalcAllTables
 bin/test_play 1000 1             # play positions, card results, play analysis and par against DDS
 taskset -c 0 bin/bench_positions 6 20000 21 x.bin dds      # positions of 6 cards a hand vs DDS
 sh bench/positions_vs_ddclaim.sh OUTDIR                    # 3-13 cards vs DDS and ddclaim's solver
