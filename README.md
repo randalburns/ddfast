@@ -24,16 +24,20 @@ design and the full measurement history.
 
 ## Design explainers
 
-Two illustrated explainers of the techniques behind the speed, for programmers who know C++
-and bridge basics ([all design pages](https://randalburns.github.io/ddfast/)):
+Illustrated explainers of the techniques behind the speed, for programmers who know C++ and
+bridge basics:
 
-- **[One word per hand](https://randalburns.github.io/ddfast/hand-words.html)**: each hand as
-  a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners,
-  one card per run of touching cards, the cards that decided a result) as a few bit
-  operations.
-- **[The pattern table search](https://randalburns.github.io/ddfast/table-search.html)**: the
-  per-deal transposition table of card patterns, its directory and blocks, and how AVX-512
-  matches a block of 8 stored patterns against a position in a few instructions.
+- **[ddfast design](https://randalburns.github.io/ddfast/)**: the index of the pages.
+  - **[One word per hand](https://randalburns.github.io/ddfast/hand-words.html)**: each hand
+    as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick
+    winners, one card per run of touching cards, the cards that decided a result) as a few
+    bit operations.
+  - **[Follow-hand rules](https://randalburns.github.io/ddfast/follow-hand.html)**: how the
+    second, third and fourth hands pick their first card with a few cheap rules instead of
+    DDS's per-card weights, with worked examples.
+  - **[Endgame tables](https://randalburns.github.io/ddfast/endgame-tables.html)**: every 2-
+    and 3-card ending as one lookup, and 4-card endings matched against learned card
+    patterns, with examples from the real tables.
 
 The pages are published from the `gh-pages` branch.
 
