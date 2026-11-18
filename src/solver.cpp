@@ -1,6 +1,6 @@
 // ddfast's search: an exact double-dummy solver for full deals, a lean scalar zero-window
-// search in ddclaim's style widened to 13 cards a hand, finishing endings of 2, 3 and 4 cards
-// in ddclaim's tables (ddclaim/tables.hpp). See docs/NOTES.md for the design and its history.
+// search over 64-bit hand words, finishing endings of 2, 3 and 4 cards in the endgame tables
+// (tables.hpp). See docs/NOTES.md for the design and its history.
 //
 // Everything here is internal (an anonymous namespace); the entry points are in namespace
 // ddfast::detail at the end, used by api.cpp.
@@ -10,7 +10,7 @@
 #undef STATS
 #endif
 #include <unordered_map>
-#include "ddclaim/port.hpp"
+#include "port.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -32,8 +32,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "ddclaim.hpp"
-#include "ddclaim/tables.hpp"
+#include "position.hpp"
+#include "tables.hpp"
 #include "dds_port.hpp"
 #include "internal.hpp"
 
@@ -44,10 +44,10 @@ namespace ddfast::detail { const uint8_t* g_first_target; }
 namespace {
 
 // The hand-word helpers (a hand is a 64-bit word, suit s in bits 16s .. 16s+12, the trump
-// suit, if any, moved to lane 3) and the endgame tables with their probes come from ddclaim.
-using namespace ddclaim::bits;
-using namespace ddclaim::tables;
-using ddclaim::Position;
+// suit, if any, moved to lane 3) and the endgame tables with their probes are in tables.hpp.
+using namespace ddcore::bits;
+using namespace ddcore::tables;
+using ddcore::Position;
 
 // The suit lengths of seats 0..3 in suits 1..3, packed (pext of lens by 0xFFF0FFF0FFF0FFF0).
 inline u64 lens48(u64 x) {
@@ -55,7 +55,7 @@ inline u64 lens48(u64 x) {
 }
 // The 16 nibbles of x as bytes.
 inline void spread_nibbles(u64 x, uint8_t* out) {
-#if DDCLAIM_X86
+#if DDPORT_X86
   _mm_storeu_si128((__m128i*)out, _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)x), _mm_cvtsi64_si128((long long)(x >> 4)))));
 #else
   namespace hn = hwy::HWY_NAMESPACE;
@@ -397,7 +397,7 @@ struct NB {
     h[0] = H[0], h[1] = H[1], h[2] = H[2], h[3] = H[3], lens = LENS;
     all = a;
     spread_nibbles(LENS, ln);
-#if DDCLAIM_X86
+#if DDPORT_X86
     __m256i x = _mm256_and_si256(_mm256_set1_epi64x((long long)a), _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0)));
     const __m256i top = _mm256_set1_epi64x((long long)(1ull << 63));
     const __m256i v1 = _mm256_set1_epi64x((long long)H[1]), v2 = _mm256_set1_epi64x((long long)H[2]), v3 = _mm256_set1_epi64x((long long)H[3]);
@@ -476,7 +476,7 @@ __attribute__((always_inline)) inline int nq_quick(const NB& b, int hand, int n,
   // a second card of partner's under the leader's top (the opponents following or out of trumps).
   {
     auto q = [](unsigned m, int x) { return (m >> (4 * x)) & 15u; };
-#if DDCLAIM_X86
+#if DDPORT_X86
     const __m128i lv = _mm_loadu_si128((const __m128i*)b.ln);
     const unsigned nzm = _mm_test_epi8_mask(lv, lv), g2m = _mm_cmpgt_epi8_mask(lv, _mm_set1_epi8(1));
     const __m256i vw = _mm256_load_si256((const __m256i*)b.wb), vP = _mm256_set1_epi64x((long long)b.h[P]);
@@ -970,7 +970,7 @@ inline bool dds_bounds(int n, int L, int target, u64 all, bool& filled, u64& R, 
 #else
   // The same for the four suits at once: per lane, the side's cards above the other side's
   // highest card (lanes are disjoint, so one popcount of their union).
-#if DDCLAIM_X86
+#if DDPORT_X86
   const __m256i lanes = _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0));
   const __m256i oth = _mm256_and_si256(_mm256_set1_epi64x((long long)(all & ~side)), lanes);
   const __m256i below = _mm256_srlv_epi64(_mm256_set1_epi64x(-1), _mm256_lzcnt_epi64(oth));
@@ -1257,7 +1257,7 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
   return nm;
 }
 
-#if DDCLAIM_ARM
+#if DDPORT_ARM
 // native_order with Highway: the per-suit part as in the AVX-512 version below (one 32-bit lane
 // per suit in 128-bit vectors), then a branch-free scalar loop over the cards, which looks up
 // each card's class in per-suit tables (in place of AVX-512's compress and permutes).
@@ -1406,7 +1406,7 @@ template <bool NT>
 inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
 #if defined(OLD_ORDER)
   return native_order_scalar<NT>(n, L, hint, all, cards, key);
-#elif DDCLAIM_ARM
+#elif DDPORT_ARM
   return native_order_hwy<NT>(n, L, hint, all, cards, key);
 #else
   using V = __m128i;
@@ -1596,9 +1596,8 @@ inline u64 pick_best(const u64* cards, const uint16_t* key, u64 cand) {
   return cards[15 - (bk & 15)];
 }
 
-// The endgame tables (two- and three-card tables, pattern tables) are ddclaim's: see
-// ddclaim/tables.hpp.
-// Interleaved searches (solve_positions on small positions, ddclaim's mini-stacks): a probe
+// The endgame tables (two- and three-card tables, the 4-card pattern table): see tables.hpp.
+// Interleaved searches (solve_positions on small positions, on small stacks): a probe
 // of a table in memory prefetches its entry and hands over to the next search. Outside such
 // a batch yield() is one test of a flag.
 thread_local bool g_inter = false;
@@ -1755,7 +1754,7 @@ inline bool later_tricks(int L, int need, u64 all, u64& R) {
 // Transposition-table block matching (8 entries a block). Narrow entries: e[0..7] the masked
 // values, e[8..15] the masks with the bounds bits; wide entries: e[0..7] the masks with the
 // bounds, e[8..15] and e[16..23] the two masked values.
-#if DDCLAIM_X86 && !defined(ABL_SCALAR_TT)
+#if DDPORT_X86 && !defined(ABL_SCALAR_TT)
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   const __m512i vb = _mm512_load_si512(e + 8);
   const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
@@ -1778,7 +1777,7 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
                                       _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
   return _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
 }
-#elif DDCLAIM_X86  // ABL_SCALAR_TT: the same, one entry at a time
+#elif DDPORT_X86  // ABL_SCALAR_TT: the same, one entry at a time
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   unsigned k = 0;
   for (int i = 0; i < 8; i++) k |= unsigned((e[8 + i] & own) == e[i] && (e[8 + i] & dec)) << i;
@@ -1802,7 +1801,7 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
   }
   return best;
 }
-#else  // DDCLAIM_ARM: Highway
+#else  // DDPORT_ARM: Highway
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   namespace hn = hwy::HWY_NAMESPACE;
   const ddport::D64 d;
@@ -2212,7 +2211,7 @@ bool lead(int n, int L, int target, u64& R) {
     }
   }
 
-  // Persistent pattern table (ddclaim's; never filled here).
+  // The 4-card pattern table (read-only here).
   if (n >= 4 && n < 4 + P_LEVELS && g_pt[n - 4].use) {
     STAT(g_plook[n - 4]++);
     PatternQuery pq;
@@ -2966,7 +2965,7 @@ thread_local Ctx g_ctx[MAX_CTX];
 thread_local int g_cur = -1;  // the running context, or -1 outside a batch
 thread_local void* g_main_sp;
 thread_local char* g_stacks;
-thread_local const ddclaim::Position* g_pos;
+thread_local const ddcore::Position* g_pos;
 thread_local size_t g_count, g_next;
 thread_local uint8_t* g_out;
 thread_local uint32_t g_gen_counter = 1;
@@ -2999,7 +2998,7 @@ __attribute__((noinline)) void yield_switch() {
 // keep: the previous call was the same deal and strain, so its table still holds (its entries
 // are valid for any leader); a full table solves the four declarers of a strain this way.
 // ask > 0: answer only "do North-South take at least ask tricks?" (1 or 0; 1 <= ask <= n).
-inline int solve_position(const ddclaim::Position& p, int first = 0, bool keep = false, int ask = 0) {
+inline int solve_position(const ddcore::Position& p, int first = 0, bool keep = false, int ask = 0) {
   ensure_state();
   const int tr = p.trump;
   u64 lens = 0;
@@ -3046,7 +3045,7 @@ void ctx_main() {
   abort();
 }
 
-void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks, int nctx) {
+void run_batch(const ddcore::Position* positions, size_t count, uint8_t* tricks, int nctx) {
   g_pos = positions, g_count = count, g_next = 0, g_out = tricks;
   if (size_t(nctx) > count) nctx = int(count);
   if (nctx < 1) return;
@@ -3079,11 +3078,11 @@ namespace ddfast::detail {
 
 void init(const char* dir) {
   ensure_state();
-  // The tables come from ddclaim: the two-card table (built in memory), the three-card table
+  // The endgame tables: the two-card table (built in memory), the three-card table
   // and the four-card pattern table, loaded from the table directory or built there.
-  const char* lv = getenv("DDCLAIM_LEVELS");
-  ddclaim::tables::init_tables(dir, lv && *lv ? atoi(lv) : 1);
-  ddclaim::tables::attach();  // this file's copy of the table state (see ddclaim/tables.hpp)
+  const char* lv = getenv("DDFAST_TABLE_LEVELS");
+  ddcore::tables::init_tables(dir, lv && *lv ? atoi(lv) : 1);
+  ddcore::tables::attach();  // this file's copy of the table state (see tables.hpp)
   if (getenv("LEAN_NOP4")) g_pt[0].use = false;
   if (getenv("LEAN_NOT3")) g_use3 = false;
   if (getenv("LEAN_NOT2")) g_use2 = false;  // leave-one-out / DDS-search study: search 2-card endings

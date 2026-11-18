@@ -15,7 +15,7 @@
 #include <numeric>
 #include <thread>
 
-#include "ddclaim.hpp"
+#include "position.hpp"
 #include "internal.hpp"
 
 #if defined(__linux__)
@@ -29,8 +29,8 @@
 namespace ddfast {
 namespace {
 
-inline ddclaim::Position to_position(const Problem& p) {
-  ddclaim::Position q;
+inline ddcore::Position to_position(const Problem& p) {
+  ddcore::Position q;
   for (int s = 0; s < 4; s++)
     for (int h = 0; h < 4; h++) q.hand[s][h] = p.hand[s][h];
   q.trump = p.trump;
@@ -79,7 +79,7 @@ struct Pool {
   alignas(64) std::atomic<size_t> next{0};
 
   void worker(int w) {
-    if (cpus[w] >= 0) ddclaim::pin_thread(cpus[w]);
+    if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
     const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
     const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = perf_open(PERF_COUNT_HW_CACHE_MISSES);
     const int ft = perf_open(PERF_COUNT_HW_CACHE_DTLB | (PERF_COUNT_HW_CACHE_OP_READ << 8) | (PERF_COUNT_HW_CACHE_RESULT_MISS << 16), PERF_TYPE_HW_CACHE);
@@ -195,7 +195,7 @@ void run_round(Pool& P, size_t n, const uint32_t* order, int ncpu, std::vector<W
 void init(const char* table_dir) { detail::init(table_dir); }
 
 void solve(const Problem* problems, size_t n, uint8_t* tricks) {
-  std::vector<ddclaim::Position> ps(n);
+  std::vector<ddcore::Position> ps(n);
   for (size_t i = 0; i < n; i++) ps[i] = to_position(problems[i]);
   detail::solve(ps.data(), n, tricks);  // North-South's tricks
   for (size_t i = 0; i < n; i++)
@@ -204,7 +204,7 @@ void solve(const Problem* problems, size_t n, uint8_t* tricks) {
 
 namespace {
 // Fills q from p; the cards per hand, or -1 if p is not a valid position.
-int to_claim(const Position& p, ddclaim::Position& q) {
+int to_claim(const Position& p, ddcore::Position& q) {
   int n = -1;
   for (int s = 0; s < 4; s++) {
     int len = 0;
@@ -226,10 +226,10 @@ void solve_positions(const Position* positions, size_t n, uint8_t* tricks) {
   // does (interleaving full deals evicts their tables from the caches; docs/NOTES.md).
   static const int imax = getenv("DDFAST_INTERLEAVE_MAX") ? atoi(getenv("DDFAST_INTERLEAVE_MAX")) : kInterleaveMax;
   static const int ictx = getenv("DDFAST_INTERLEAVE_CTX") ? atoi(getenv("DDFAST_INTERLEAVE_CTX")) : kInterleaveCtx;
-  std::vector<ddclaim::Position> small;
+  std::vector<ddcore::Position> small;
   std::vector<size_t> where;
   for (size_t i = 0; i < n; i++) {
-    ddclaim::Position q;
+    ddcore::Position q;
     const int c = to_claim(positions[i], q);
     if (c < 0) tricks[i] = 0xFF;
     else if (c <= imax) small.push_back(q), where.push_back(i);
@@ -242,7 +242,7 @@ void solve_positions(const Position* positions, size_t n, uint8_t* tricks) {
 }
 
 int solve_position(const Position& p, bool keep_table) {
-  ddclaim::Position q;
+  ddcore::Position q;
   int n = -1;
   for (int s = 0; s < 4; s++) {
     int len = 0;
@@ -258,7 +258,7 @@ int solve_position(const Position& p, bool keep_table) {
 
 void solve_table(const Deal& deal, Table& table) { detail::solve_table(deal.hand, table.tricks); }
 
-bool pin_thread(int cpu) { return ddclaim::pin_thread(cpu); }
+bool pin_thread(int cpu) { return ddcore::pin_thread(cpu); }
 
 unsigned long long stat_nodes() { return detail::nodes(); }
 

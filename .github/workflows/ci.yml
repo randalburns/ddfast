@@ -38,8 +38,8 @@ jobs:
           filters: |
             simd:
               - 'src/solver.cpp'
-              - 'extern/ddclaim/include/ddclaim/port.hpp'
-              - 'extern/ddclaim/src/ddclaim.cpp'
+              - 'src/port.hpp'
+              - 'src/tables.cpp'
               - 'scripts/build.sh'
               - 'scripts/ci.sh'
               - '.github/workflows/ci.yml'
@@ -69,8 +69,8 @@ jobs:
         if: steps.cpu.outputs.native != 'true'
       - uses: actions/cache@v4
         with:
-          path: build/ddclaim
-          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/ddclaim/src/**', 'extern/ddclaim/include/**') }}
+          path: build/tables
+          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/tables.cpp', 'src/tables.hpp', 'src/position.hpp') }}
       - name: Build and test (native AVX-512)
         if: steps.cpu.outputs.native == 'true'
         run: sh scripts/ci.sh
@@ -96,8 +96,8 @@ jobs:
           path: highway
       - uses: actions/cache@v4
         with:
-          path: build/ddclaim
-          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/ddclaim/src/**', 'extern/ddclaim/include/**') }}
+          path: build/tables
+          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/tables.cpp', 'src/tables.hpp', 'src/position.hpp') }}
       - name: Build and test
         run: HWY_INC=$PWD/highway sh scripts/ci.sh
 
@@ -115,8 +115,8 @@ jobs:
           path: highway
       - uses: actions/cache@v4
         with:
-          path: build/ddclaim
-          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/ddclaim/src/**', 'extern/ddclaim/include/**') }}
+          path: build/tables
+          key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/tables.cpp', 'src/tables.hpp', 'src/position.hpp') }}
       - name: Build and test
         run: HWY_INC=$PWD/highway sh scripts/ci.sh
 

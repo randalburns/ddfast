@@ -5,7 +5,7 @@
 # Runs A/bench_solve and B/bench_solve in turn `pairs` times (default 5) on CPU $CPU (default 0;
 # keep its SMT sibling idle) on the set (default tests/data/public.set), then prints each
 # build's median, min and max cycles/deal, and, where OUT/bprof exists, its exact branch-miss
-# counts per deal (nearly noise-free, so good for screening). Needs DDCLAIM_DIR.
+# counts per deal (nearly noise-free, so good for screening). Needs DDFAST_TABLES.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

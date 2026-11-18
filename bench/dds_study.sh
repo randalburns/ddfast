@@ -1,7 +1,7 @@
 #!/bin/sh
 # ddfast running DDS's search, against DDS: what is left is mostly the hand representation
 # (one word per hand, trumps in a fixed lane). See docs/LOO.md.
-# usage: sh bench/dds_study.sh OUTDIR [SET]       (from the repository root; DDCLAIM_DIR set)
+# usage: sh bench/dds_study.sh OUTDIR [SET]       (from the repository root; DDFAST_TABLES set)
 #
 # DDS's search in ddfast: DDS's first target (7 for the leader's side, 6 when E-W lead), DDS's
 # bounds and second-hand quick tricks at every level, DDS's lead and follow weights, no follow

@@ -1,5 +1,4 @@
-// Shared by bench_positions (ddfast) and ddclaim_positions (ddclaim's standalone solver): the
-// random positions, exactly as ddclaim's own benchmark makes them, and a cycle counter.
+// For bench_positions: random positions of one size, and a cycle counter.
 #pragma once
 
 #include <algorithm>

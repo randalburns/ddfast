@@ -1,5 +1,5 @@
-// ddclaim's tables of solved endings, for programs that search deeper positions themselves
-// and want to finish them off with ddclaim's tables (ddfast does this for full deals).
+// The endgame tables: solved endings of 2, 3 and 4 cards a hand, which ddfast's search uses to
+// finish off the positions it reaches.
 //
 // What is here:
 //   - the hand-word helpers: a hand is a 64-bit word, suit s in bits 16s .. 16s+12 (bit 12
@@ -8,14 +8,14 @@
 //     loaded by init_tables() and read through attach() (below);
 //   - the probes: inline functions that answer "does the leader's side of this ending take at
 //     least `target` tricks", with the set of cards that decided it. They are in this header
-//     so that they inline into the caller's search; ddclaim's own solver uses the same code.
+//     so that they inline into the caller's search; the table builder uses the same code.
 //
 // Requires an x86-64 CPU with AVX-512 and BMI2 (build with -march=native or the equivalent),
 // or AArch64 (Apple silicon; see port.hpp).
-// Link with ddclaim (src/ddclaim.cpp), which holds the table data and init_tables().
+// tables.cpp holds the table data and init_tables().
 #pragma once
 
-#include "ddclaim/port.hpp"
+#include "port.hpp"
 
 #include <bit>
 #include <cstddef>
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-namespace ddclaim {
+namespace ddcore {
 
 // ---------------------------------------------------------------------------------------
 // Hand words.
@@ -68,7 +68,7 @@ inline u64 shuffle_lanes(u64 x, const uint8_t* ctl) { return ddport::shuf8(x, ct
 // The tables. All of them are leader-relative: a probe is given the four hands H[0..3]
 // (seats N E S W), the leader L and the cards present `all`, and answers for the leader's
 // side. The result of every probe is bool "North-South reach `target` tricks" (target counted
-// for North-South, as in ddclaim's search) and R, the cards that decided it, filled up to the
+// for North-South, as in the search) and R, the cards that decided it, filled up to the
 // top of each suit (fill_up).
 namespace tables {
 
@@ -90,8 +90,7 @@ constexpr size_t T3_ARR = 369600, T3_CFG = 102, T3_BYTES = T3_CFG * 2 * T3_ARR *
 // (the same mask under both bit strings), bits 56-58 and 59-61 bounds on the leader's side's
 // tricks, bit 63 set. An unused slot has a = ~0, b = 0. A run stores its a's and then its b's
 // (64 bytes per group each). Files p4_v5.{idx,ent}. The table is filled by
-// solving random six-card endings, then frozen. (ddclaim also had 5- and 6-card levels; they
-// saved ddfast 6% of nodes and no time, see docs/NOTES.md, and were removed.)
+// solving random six-card endings, then frozen.
 constexpr int P_LEVELS = 1;
 constexpr int P_CHUNK = 8;  // groups prefetched at a time
 struct PDir {
@@ -125,15 +124,15 @@ struct Snapshot {
   PTable pt[P_LEVELS];
 };
 
-// Where the table files live: the directory given to init_tables(), else $DDCLAIM_DIR, else
-// build/ddclaim under the current directory. Read when the tables are loaded, not before.
+// Where the table files live: the directory given to init_tables(), else $DDFAST_TABLES, else
+// build/tables under the current directory. Read when the tables are loaded, not before.
 std::string table_dir();
 
 // Loads the tables, building any that are missing (and writing them to table_dir()): the
 // two-card table (always, in memory), the three-card table and, if pattern_levels >= 1,
 // the 4-card pattern table. `dir` may be null (see
 // table_dir()). Building the three-card table takes about a minute on many threads; the
-// pattern table is filled for up to DDCLAIM_SECONDS (170 by default). Call once, from one
+// pattern table is filled for up to DDFAST_TABLE_SECONDS (170 by default). Call once, from one
 // thread, before any probe.
 void init_tables(const char* dir, int pattern_levels);
 
@@ -143,9 +142,9 @@ void snapshot(Snapshot& out);
 
 // The table state the probes read. Every file that includes this header has its own copy,
 // with internal linkage: the compiler then knows that nothing outside the file changes it, and
-// keeps table pointers and flags in registers across calls (in ddclaim's search, global
-// variables visible to other files cost about 2%). ddclaim fills its copy in init_tables();
-// any other file calls attach() once after init_tables() (or ddclaim::init()).
+// keeps table pointers and flags in registers across calls (global variables visible to other
+// files cost about 2% in the table builder's search). tables.cpp fills its copy in
+// init_tables(); any other file calls attach() once after init_tables().
 namespace {
 
 [[maybe_unused]] bool g_use2 = false;
@@ -177,7 +176,8 @@ namespace {
 // ---------------------------------------------------------------------------------------
 // Probes. H: the four hands; L: the leader; all = H[0] | H[1] | H[2] | H[3]; every hand
 // holds n cards; target in 1..n is North-South's. `pause` is called once a table entry has
-// been prefetched (ddclaim switches to another search there; pass [] {} otherwise).
+// been prefetched (an interleaved search switches to another search there; pass [] {}
+// otherwise).
 
 // n == 2; needs g_use2.
 template <bool NT>
@@ -286,4 +286,4 @@ inline int probe_pattern(const u64* H, u64 lens, int n, int L, u64 all, int targ
 
 }  // namespace
 }  // namespace tables
-}  // namespace ddclaim
+}  // namespace ddcore

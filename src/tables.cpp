@@ -1,6 +1,10 @@
-// ddclaim: an exact double-dummy solver for small endings (a lean scalar zero-window search
-// over tables of solved endings). See README.md for use and NOTES.md for the design.
-#include "ddclaim/port.hpp"
+// The endgame tables: loading and building them. The 2-card table is built in memory, the
+// 3-card table by solving every 3-card ending, and the 4-card pattern table by solving random
+// 6-card endings for a fixed time with the small-ending search below (its own transposition
+// table and interleaved searches) and keeping every pattern proved for a 4-card ending. The
+// layouts and the probes ddfast's search calls are in tables.hpp; the original design notes
+// are in docs/TABLES_NOTES.md.
+#include "port.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -24,8 +28,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "ddclaim.hpp"
-#include "ddclaim/tables.hpp"
+#include "position.hpp"
+#include "tables.hpp"
 
 namespace ddport {
 bool pin_to_cpu(int cpu) {
@@ -49,9 +53,9 @@ bool pin_to_cpu(int cpu) {
 namespace {
 
 // The hand-word helpers and the tables of solved endings, with their probes, are in
-// ddclaim/tables.hpp (shared with programs that use the tables).
-using namespace ddclaim::bits;
-using namespace ddclaim::tables;
+// tables.hpp (shared with ddfast's search).
+using namespace ddcore::bits;
+using namespace ddcore::tables;
 
 #ifdef DBG
 }
@@ -740,7 +744,7 @@ void build_t2() {
 
 // ---------------------------------------------------------------------------------------
 // The three-card table.
-// Where the table files live: $DDCLAIM_DIR, or build/ddclaim under the current directory.
+// Where the table files live: $DDFAST_TABLES, or build/tables under the current directory.
 void make_table_dir() {
   const std::string d = table_dir();
   for (size_t i = 1; i <= d.size(); i++)
@@ -1000,7 +1004,7 @@ void build_t3() {
 // Coroutines: several positions are searched in turn on one thread. A search that needs a
 // three-card table entry prefetches it and hands over to the next search, so the memory
 // access is over by the time it resumes.
-DDPORT_DEFINE_CTX_SWITCH(ddclaim_ctx_switch)
+DDPORT_DEFINE_CTX_SWITCH(tables_ctx_switch)
 
 constexpr int MAX_CTX = 64;
 constexpr size_t STACK_BYTES = 64 << 10;
@@ -1015,7 +1019,7 @@ thread_local Ctx g_ctx[MAX_CTX];
 thread_local int g_cur = -1;  // the running context, or -1 outside a batch
 thread_local void* g_main_sp;
 thread_local char* g_stacks;
-thread_local const ddclaim::Position* g_pos;
+thread_local const ddcore::Position* g_pos;
 thread_local size_t g_count, g_next;
 thread_local uint8_t* g_out;
 thread_local uint32_t g_gen_counter = 1;
@@ -1039,10 +1043,10 @@ __attribute__((noinline)) void yield() {
   g_cur = a.next;
   Ctx& b = g_ctx[g_cur];
   load_state(b);
-  ddclaim_ctx_switch(&a.sp, b.sp);
+  tables_ctx_switch(&a.sp, b.sp);
 }
 
-inline int solve_position(const ddclaim::Position& p) {
+inline int solve_position(const ddcore::Position& p) {
   const int tr = p.trump;
   u64 lens = 0;
   int n = 0;
@@ -1072,19 +1076,19 @@ void ctx_main() {
   Ctx& a = g_ctx[g_cur];
   if (a.next == g_cur) {
     g_cur = -1;
-    ddclaim_ctx_switch(&a.sp, g_main_sp);
+    tables_ctx_switch(&a.sp, g_main_sp);
   } else {
     g_ctx[a.prev].next = a.next;
     g_ctx[a.next].prev = a.prev;
     g_cur = a.next;
     Ctx& b = g_ctx[g_cur];
     load_state(b);
-    ddclaim_ctx_switch(&a.sp, b.sp);
+    tables_ctx_switch(&a.sp, b.sp);
   }
   abort();
 }
 
-void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks, int nctx) {
+void run_batch(const ddcore::Position* positions, size_t count, uint8_t* tricks, int nctx) {
   g_pos = positions, g_count = count, g_next = 0, g_out = tricks;
   if (size_t(nctx) > count) nctx = int(count);
   if (nctx < 1) return;
@@ -1097,7 +1101,7 @@ void run_batch(const ddclaim::Position* positions, size_t count, uint8_t* tricks
     save_state(c);
   }
   g_cur = 0;
-  ddclaim_ctx_switch(&g_main_sp, g_ctx[0].sp);
+  tables_ctx_switch(&g_main_sp, g_ctx[0].sp);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1118,7 +1122,7 @@ struct Rng {
   }
 };
 
-void random_position(Rng& rng, int cards, ddclaim::Position& p) {
+void random_position(Rng& rng, int cards, ddcore::Position& p) {
   int deck[52];
   for (int i = 0; i < 52; i++) deck[i] = i;
   memset(&p, 0, sizeof p);
@@ -1167,7 +1171,7 @@ void* map_file(const std::string& path, size_t bytes, bool writable) {
   char* at = reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(base) + huge - 1) & ~(huge - 1));
 #ifndef MAP_POPULATE
 #define MAP_POPULATE 0
-#define DDCLAIM_NO_POPULATE 1
+#define DDFAST_TABLE_NO_POPULATE 1
 #endif
   void* p = mmap(at, bytes, writable ? PROT_READ | PROT_WRITE : PROT_READ, MAP_SHARED | MAP_FIXED | (writable ? 0 : MAP_POPULATE), fd, 0);
   close(fd);
@@ -1178,7 +1182,7 @@ void* map_file(const std::string& path, size_t bytes, bool writable) {
   if (at > base) munmap(base, size_t(at - base));
   char* end = at + ((bytes + 4095) & ~size_t(4095));
   if (base + span > end) munmap(end, size_t(base + span - end));
-#ifdef DDCLAIM_NO_POPULATE  // macOS: read the file in now, as MAP_POPULATE does
+#ifdef DDFAST_TABLE_NO_POPULATE  // macOS: read the file in now, as MAP_POPULATE does
   if (!writable) {
     madvise(p, bytes, MADV_WILLNEED);
     volatile char sink = 0;
@@ -1186,7 +1190,7 @@ void* map_file(const std::string& path, size_t bytes, bool writable) {
   }
 #endif
 #ifdef MADV_COLLAPSE
-  if (!writable && !getenv("DDCLAIM_NOCOLLAPSE")) madvise(p, bytes & ~(huge - 1), MADV_COLLAPSE);  // best effort
+  if (!writable && !getenv("DDFAST_TABLE_NOCOLLAPSE")) madvise(p, bytes & ~(huge - 1), MADV_COLLAPSE);  // best effort
 #endif
   return p;
 }
@@ -1330,8 +1334,8 @@ bool p_load(int lv) {
   if (!ok) return false;
   pt.lines = head[2];
   // By default the file is read into huge pages, which is about 9% faster to search than
-  // mapping it (this kernel gives file mappings 4 KB pages). DDCLAIM_MAP=1 maps it instead.
-  if (!getenv("DDCLAIM_MAP")) {
+  // mapping it (this kernel gives file mappings 4 KB pages). DDFAST_TABLE_MAP=1 maps it instead.
+  if (!getenv("DDFAST_TABLE_MAP")) {
     u64* m = static_cast<u64*>(alloc_huge(pt.lines * 64 + 64));
     FILE* g = fopen(p_path(lv, "ent").c_str(), "rb");
     ok = g && fread(m, 64, pt.lines, g) == pt.lines;
@@ -1362,7 +1366,7 @@ long env_long(const char* name, long dflt) { return getenv(name) ? atol(getenv(n
 void build_p(int levels) {
   if (levels < 0) levels = 0;
   if (levels > P_LEVELS) levels = P_LEVELS;
-  if (!getenv("DDCLAIM_WARM")) {
+  if (!getenv("DDFAST_TABLE_WARM")) {
     bool ok = true;
     for (int lv = 0; lv < levels; lv++) ok = ok && p_load(lv);
     if (ok) {
@@ -1374,11 +1378,11 @@ void build_p(int levels) {
   // search above 4 cards, with its own transposition table, only drives the fill); the
   // patterns they prove are merged in after each round. Stops at the ending count, the
   // file budget or the time budget.
-  const long warm = env_long("DDCLAIM_WARM", 200000000);
-  const long round_max = env_long("DDCLAIM_ROUND", 3000000);
-  const double max_seconds = double(env_long("DDCLAIM_SECONDS", 170));
-  const size_t max_bytes = size_t(env_long("DDCLAIM_MB", 3400)) << 20;
-  const size_t caps[P_LEVELS] = {size_t(env_long("DDCLAIM_CAP4", 256))};
+  const long warm = env_long("DDFAST_TABLE_WARM", 200000000);
+  const long round_max = env_long("DDFAST_TABLE_ROUND", 3000000);
+  const double max_seconds = double(env_long("DDFAST_TABLE_SECONDS", 170));
+  const size_t max_bytes = size_t(env_long("DDFAST_TABLE_MB", 3400)) << 20;
+  const size_t caps[P_LEVELS] = {size_t(env_long("DDFAST_TABLE_CAP4", 256))};
   const double t_start = now_seconds();
   mkdir("build", 0777);
   make_table_dir();
@@ -1404,7 +1408,7 @@ void build_p(int levels) {
       th.emplace_back([&, i] {
         g_plog = &logs[i * P_LEVELS];
         Rng rng{0x1234567ull * (i + 1) + 0x9876543ull * u64(round)};
-        std::vector<ddclaim::Position> ps(1024);
+        std::vector<ddcore::Position> ps(1024);
         std::vector<uint8_t> out(1024);
         for (long k = 0; k < n / long(nthreads); k += 1024) {
           for (auto& p : ps) random_position(rng, 6, p);
@@ -1437,7 +1441,7 @@ void build_p(int levels) {
     for (auto& x : mt) x.join();
     for (int lv = 0; lv < levels; lv++) {
       ok = ok && merged_ok[lv];
-      if (getenv("DDCLAIM_VERBOSE"))
+      if (getenv("DDFAST_TABLE_VERBOSE"))
         fprintf(stderr, "p%d round %d: %ld endings, %zu new, %zu runs, %.0f MB, %.1f s\n", lv + 4, round, done, recs[lv].size(),
                 g_pclasses[lv].size(), double(g_pt[lv].lines) * 64 / 1e6, now_seconds() - t_start);
     }
@@ -1452,7 +1456,7 @@ void build_p(int levels) {
 
 }  // namespace
 
-namespace ddclaim {
+namespace ddcore {
 namespace tables {
 
 void snapshot(Snapshot& out) {
@@ -1467,13 +1471,13 @@ void snapshot(Snapshot& out) {
 }
 
 namespace {
-std::string g_dir;  // set by init_tables(); empty: $DDCLAIM_DIR or the default
+std::string g_dir;  // set by init_tables(); empty: $DDFAST_TABLES or the default
 }
 
 std::string table_dir() {
   if (!g_dir.empty()) return g_dir;
-  const char* d = getenv("DDCLAIM_DIR");
-  return d && *d ? d : "build/ddclaim";
+  const char* d = getenv("DDFAST_TABLES");
+  return d && *d ? d : "build/tables";
 }
 
 void init_tables(const char* dir, int pattern_levels) {
@@ -1487,4 +1491,4 @@ void init_tables(const char* dir, int pattern_levels) {
 
 bool pin_thread(int cpu) { return ddport::pin_to_cpu(cpu); }
 
-}  // namespace ddclaim
+}  // namespace ddcore

@@ -17,7 +17,7 @@ if [ -z "${CXX:-}" ]; then
 fi
 # -no-pie: sampled addresses are then the binary's own, as addr2line expects.
 # shellcheck disable=SC2086
-$CXX -std=c++20 -O2 -g -march=native -no-pie -Iinclude -Iextern/ddclaim/include -Itests \
+$CXX -std=c++20 -O2 -g -march=native -no-pie -Iinclude -Isrc -Itests \
   -Iextern/dds/library/src -Iextern/dds/library/src/api \
   tools/prof/bprof.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bprof"
 echo "tools/prof/build.sh: $OUT/bprof"

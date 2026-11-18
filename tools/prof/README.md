@@ -13,7 +13,7 @@ These tools use them directly. Linux x86-64 only.
 
 ## Where do the branch misses (or cycles) go?
 ```sh
-export DDCLAIM_DIR=/path/to/ddclaim/tables
+export DDFAST_TABLES=/path/to/tables
 XFLAGS=-g OUT=bin-prof sh scripts/build.sh        # -g only adds line tables
 sh tools/prof/build.sh bin-prof
 taskset -c 0 bin-prof/bprof tests/data/public.set bm > bm.txt     # or: cyc

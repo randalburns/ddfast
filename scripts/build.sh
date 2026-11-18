@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds ddfast. Run from anywhere; everything goes to bin/ (or $OUT):
-#   bin/libddfast.a     the library: ddfast and ddclaim (link it with -pthread)
+#   bin/libddfast.a     the library, endgame tables included (link it with -pthread)
 #   bin/ddfast          the command-line tool (tools/ddfast_cli.cpp)
 #   bin/test_ddfast     the exactness tests against DDS (tests/)
 #   bin/make_ref         writes a test set with DDS's answers (tests/make_ref.cpp)
@@ -11,7 +11,7 @@
 #
 # Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native) on Linux, or Apple silicon on
 # macOS (-mcpu=native) with Google Highway's headers (brew install highway; Highway in place
-# of AVX-512, see extern/ddclaim/include/ddclaim/port.hpp; HWY_INC overrides where they are
+# of AVX-512, see src/port.hpp; HWY_INC overrides where they are
 # found), and the submodules
 # (git clone --recursive, or git submodule update --init). Uses clang++ if present, else g++;
 # set CXX to choose. Environment:
@@ -30,7 +30,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 OUT=${OUT:-bin}
 mkdir -p "$OUT/obj" "$OUT/dds"
-if [ ! -f extern/ddclaim/src/ddclaim.cpp ] || [ ! -d extern/dds/library/src ]; then
+if [ ! -d extern/dds/library/src ]; then
   echo "build.sh: submodules missing; run: git submodule update --init" >&2
   exit 1
 fi
@@ -76,24 +76,24 @@ case "$(uname -m)" in
     ARCH="$ARCH -I$HWY_INC" ;;
 esac
 BASE="-std=c++20 -O3 -DNDEBUG $ARCH"
-INC="-Iinclude -Iextern/ddclaim/include"
+INC="-Iinclude -Isrc"
 DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
-# The library: ddclaim (the tables, compiled without XFLAGS) and ddfast.
-rm -f "$OUT/obj/ddclaim.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
+# The library: the endgame tables (compiled without XFLAGS) and the search.
+rm -f "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
 # shellcheck disable=SC2086
 {
-  $CXX $BASE -Iextern/ddclaim/include -c extern/ddclaim/src/ddclaim.cpp -o "$OUT/obj/ddclaim.o" &
+  $CXX $BASE -Isrc -c src/tables.cpp -o "$OUT/obj/tables.o" &
   $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
   $CXX $BASE $XFLAGS $INC -Isrc -c src/par_deal.cpp -o "$OUT/obj/par_deal.o" &
   $CXX $BASE $XFLAGS $INC -c src/api.cpp -o "$OUT/obj/api.o" &
   $CXX $BASE $XFLAGS $INC -c src/play.cpp -o "$OUT/obj/play.o" &
   wait
 }
-[ -f "$OUT/obj/ddclaim.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
+[ -f "$OUT/obj/tables.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
 rm -f "$OUT/libddfast.a"
-ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/ddclaim.o"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/tables.o"
 # shellcheck disable=SC2086
 $CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
 [ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }
