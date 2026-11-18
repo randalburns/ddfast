@@ -20,6 +20,7 @@ int solve_position(const ddcore::Position& p, bool keep);
 bool query_position(const ddcore::Position& p, int target, bool keep);
 // North-South's tricks for each position, nctx searches interleaved on this thread.
 void solve_positions(const ddcore::Position* positions, size_t n, uint8_t* tricks, int nctx);
+void solve_tables_interleaved(const uint16_t* const* hands, uint8_t* const* out, size_t n, int nctx);
 // tricks[strain][declarer]: declarer's side's tricks (DDS's res_table layout).
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]);
 

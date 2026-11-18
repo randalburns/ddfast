@@ -134,6 +134,15 @@ static_assert(sizeof(Bucket) == 192);
 
 constexpr int TT_BITS = 10;
 constexpr int TT_MIN = 4;
+// Interleaving (NCTX > 1): which table probes hand over to the next search after their
+// prefetch. YIELD3: the three-card table; YIELDP: the four-card pattern table (1: after the
+// directory prefetch only, 2: also after each chunk of entry groups).
+#ifndef YIELD3
+#define YIELD3 1
+#endif
+#ifndef YIELDP
+#define YIELDP 2
+#endif
 #ifndef NCTX
 #define NCTX 1
 #endif
@@ -2109,7 +2118,11 @@ bool lead(int n, int L, int target, u64& R) {
   const u64 all = H[0] | H[1] | H[2] | H[3];
   const bool cut = !(L & 1);
   if (n == 2 && g_use2) return probe2<NT>(H, L, all, target, R);
+#if YIELD3
   if (n == 3 && g_use3) return probe3<NT>(H, L, all, target, R, [] { yield(); });
+#else
+  if (n == 3 && g_use3) return probe3<NT>(H, L, all, target, R, [] {});
+#endif
   const int needL = cut ? target : n - target + 1;
   const bool dq = n >= DMIN;
   // Table.
@@ -2216,7 +2229,13 @@ bool lead(int n, int L, int target, u64& R) {
     STAT(g_plook[n - 4]++);
     PatternQuery pq;
     size_t hit;
+#if YIELDP == 2
     const int r = probe_pattern<NT>(H, LENS, n, L, all, target, pq, R, hit, [] { yield(); });
+#elif YIELDP == 1
+    const int r = probe_pattern<NT>(H, LENS, n, L, all, target, pq, R, hit, [y = true]() mutable { if (y) y = false, yield(); });
+#else
+    const int r = probe_pattern<NT>(H, LENS, n, L, all, target, pq, R, hit, [] {});
+#endif
     if (r >= 0) {
       STAT(g_phit[n - 4]++);
 #ifndef ABL_NO_P4STORE  // leave-one-out: 4-card table hits not copied into the per-deal table
@@ -2974,6 +2993,9 @@ thread_local const ddcore::Position* g_pos;
 thread_local size_t g_count, g_next;
 thread_local uint8_t* g_out;
 thread_local uint32_t g_gen_counter = 1;
+thread_local void (*g_job)(size_t) = nullptr;  // a batch of other jobs than positions (tables)
+thread_local const uint16_t* const* g_thand;   // tables: 16 suit masks per deal
+thread_local uint8_t* const* g_tout;           // tables: 20 results per deal
 
 inline void save_state(Ctx& c) {
   c.h[0] = H[0], c.h[1] = H[1], c.h[2] = H[2], c.h[3] = H[3];
@@ -3033,6 +3055,10 @@ void ctx_main() {
     const size_t i = g_next;
     if (i >= g_count) break;
     g_next = i + 1;
+    if (g_job) {
+      g_job(i);
+      continue;
+    }
     g_out[i] = uint8_t(solve_position(g_pos[i], ddfast::detail::g_first_target ? ddfast::detail::g_first_target[i] : 0));
   }
   Ctx& a = g_ctx[g_cur];
@@ -3110,6 +3136,22 @@ void solve(const Position* positions, size_t count, uint8_t* tricks) {
 void solve_positions(const Position* positions, size_t count, uint8_t* tricks, int nctx) {
   ensure_state();
   run_batch(positions, count, tricks, nctx);
+}
+
+// Full tables, nctx interleaved on this thread: hands[i] holds deal i's 16 suit masks, out[i]
+// gets its 20 results as solve_table writes them.
+void solve_tables_interleaved(const uint16_t* const* hands, uint8_t* const* out, size_t count, int nctx) {
+  ensure_state();
+  g_thand = hands, g_tout = out;
+  g_job = [](size_t i) {
+    uint16_t h[4][4];
+    uint8_t t[5][4];
+    memcpy(h, g_thand[i], sizeof h);
+    solve_table(h, t);
+    memcpy(g_tout[i], t, sizeof t);
+  };
+  run_batch(nullptr, count, nullptr, nctx);
+  g_job = nullptr;
 }
 
 int solve_position(const Position& p, bool keep) {

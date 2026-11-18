@@ -1243,3 +1243,187 @@ build that carries the same source edits with the feature switched off.
   split); smaller first blocks for keys with few entries (changes which entry is picked, so the
   search); proof-size predictors for root and 12-card leads (about 20% of nodes on paper, no new
   predictor yet).
+
+## Round 16: batch throughput, aimed at servers (four agents, 2026-11-18)
+
+Latency stopped mattering; the goal became deals (and tables) per second per physical core with
+both SMT threads busy, on server-class machines (EPYC Zen 5 "Turin", Xeon Granite Rapids). Four
+agents, one physical core each (CPU n and its SMT sibling, builds on the slow cores), every
+change A/B against a control build of the same source. Outcome:
+
+| Agent | Result |
+|---|---|
+| 16a table sizes (tp-tables-size) | no solver change: the per-deal table's footprint does not limit SMT throughput; DIR_MIN 15 does no harm. Tooling kept (worker counters in `bench_solve parallel`, `bench_solve tables`, raw PMU events in bprof). NUMA placement of the endgame tables is the open lead for two-socket servers (issue #12). |
+| 16b interleaving (tp-interleave) | 3-10% slower in every configuration: two deals' tables per thread overflow L2, and SMT already overlaps the stalls. Kept off by default behind `DDFAST_NCTX` so servers can re-check. |
+| 16c questions (tp-questions) | single problems: no headroom (a perfect first guess saves at most 4.7-6.3% of nodes); full tables: first targets from the strain's earlier declarers, -1.1 to -2.4% cycles. Not merged: 16d does the same more fully. |
+| 16d strains (tp-strains, PR #11, merged) | full tables: first targets from the same deal's other declarers and leaders E, W, S, N: nodes -1.3 to -2.5%, cycles -1.3 to -2.5% (-3.3% after rebasing onto main). No effect on single problems. |
+
+The second SMT thread adds 1.4-1.55x per core in every agent's measurements. Follow-ups outside
+the agents: thread placement by NUMA node and core class, and no spin-waiting between questions in
+solve_deal_parallel (issue #4: 2.2x better with four calls sharing the CPUs).
+
+### 16a: table sizes and memory footprint for SMT throughput (tp-tables-size)
+
+Goal changed to batch throughput per physical core with both SMT threads busy. Measured on
+core 0 (CPUs 0 and 12) with `bench_solve parallel ... 0,12` and the new `bench_solve tables`
+mode, both of which now print the worker threads' summed cycles per deal (or table); with two
+threads on one core, core cycles per deal are about half that figure. Other agents were
+loading the other cores, so single runs vary by up to 5%; the figures below are paired medians
+of alternating runs. No change to the solver was kept.
+
+**Footprint per thread (TTSTAT counters, public set, DIR_MIN 15).** Single problems: 2,544
+keys per deal (max 11,921), so the 2^15-slot directory (512 KB) is touched at about 2,500
+random lines (160 KB) and never grows on 99% of deals; the pool hands out 7,036 lines per deal
+(450 KB; max 2.7 MB), reused from line 0 by every deal. Full tables (one reset per strain):
+3,786 keys and 11,047 lines (700 KB, max 4.4 MB) per strain. Blocks are about 45% full: 37%
+of the narrow keys hold one entry, 58% at most two, 76% at most four. Process RSS with two
+workers is 1.15 GB, all of it on transparent huge pages (the ddclaim tables are 1.13 GB of it).
+
+**SMT behaviour.** One thread: 15.6M cycles per deal; two threads on the core: 20.1M thread
+cycles per deal (10.05M core cycles, x1.55). Tables: 128.8M -> 169.4M thread cycles per table
+(x1.52). The cycle profile (bprof cyc, with a second solver running on CPU 12) keeps the same
+shape under SMT: the slowdown is spread evenly, i.e. shared execution resources, not a memory
+hot spot. Fills per thread and deal (AMD raw event 0x44, LsAnyFillsFromSys, through the new
+`DDF_RAW_CM` / `bprof raw:` hooks): from L2 142k -> 206k, from L3 19k -> 29k, from DRAM 25k ->
+25k. So the second thread costs about 10k extra L3 fills per deal (an estimated 2% of thread
+cycles at most) and no extra DRAM traffic. The DRAM fills are mostly the ddclaim probes (the
+4-card pattern probe holds about 38% of the samples; the rest skids into lead<false>).
+
+**Directory size under SMT** (paired medians, thread cycles, 2 threads on core 0):
+
+| DIR_MIN (control 15) | public, 7-11 pairs | chunk1[800] | tables public[150] |
+|---|---|---|---|
+| 11 | +0.4 / +0.9% | -1.1% | +0.4% |
+| 13 | +0.3 / +1.4% | | |
+| 14 | -1.0 / -1.4% | -1.4 / +0.0% | -0.2% |
+| 16 | +0.7% | | |
+| 12, grow at 1/8 full, DIR_MAX 22 | -0.4% | -1.2% | |
+
+All within noise (repeats of DIR_MIN 14 moved from -1.4% to +2.4% on one thread); DIR_MIN 15
+does not hurt two threads per core, and the directory size is not worth tuning per thread count.
+
+**Sensitivity to the pool's footprint:** TTPAD=k wrote k extra lines per new narrow block (same
+search, pool footprint +38% for k=1, about x2 for k=3). Two threads: public +1.0% / +1.1%
+(k = 1 / 3), chunk1 +0.5% (k=3), tables +1.8% (k=3, all 5 pairs worse). So doubling the table
+costs 0.5-1.8%; any compaction (a one-line first block for keys with at most 4 entries saves
+about 18% of the lines without changing the search; 8-byte directory slots) is worth an
+estimated 0.1-0.4%, below what can be measured here. Huge pages off for the table
+(LEAN_NOHUGE_TT): no measurable change.
+
+Expectation on servers: Turin has the same 1 MB L2 per core and 4 MB L3 per core as this
+machine's Zen 5 cluster, so the same conclusions; Granite Rapids' 2 MB L2 halves the small
+L2 effect. What will differ is DRAM: 25k fills (1.6 MB) per deal per thread go to the ddclaim
+tables, with higher latency on servers and, on two-socket machines, to a remote node for half
+of the threads (the tables are read into anonymous memory by the loading thread, so first
+touch puts them all on one node). Replicating the 1.1 GB tables per NUMA node (or at least
+interleaving them) is the footprint change most likely to matter there; it needs a
+multi-socket machine to measure.
+
+### 16b: interleaving searches on one thread (tp-interleave)
+
+Goal: deals/s and tables/s per physical core with both SMT threads busy. Question: do several
+searches per thread (the coroutines of `run_batch`, NCTX), handing over at the prefetch of a
+table probe, raise throughput on 13-card deals and full tables? Answer: no, on this machine
+(Zen 5 laptop, 1 MB L2 per core); every variant lost 3-10%. Measured on core 1 (CPUs 1 and
+13), alternating, cycles from the hardware counters (sum over the core's threads per deal or
+table); the interleaving variants run in the same binary as the control (`DDFAST_NCTX`).
+
+| Configuration | public (600) | chunk3 (first 600) |
+|---|---|---|
+| deals, 1 thread, nctx 1 / 2 / 4 | 15.58M / 16.13M (+3.5%) / +8% (set mode) | 15.50M / 16.11M (+3.9%) (7 pairs) |
+| deals, 2 threads (SMT), nctx 1 / 2 / 4 | 20.91M / 21.78M (+4.2%) / 324.6 -> 294.7 deals/s (-9%) | 19.89M / 21.09M (+6.0%) / 21.51M (+8.1%) |
+| tables (first 200), 1 thread, nctx 1 / 2 | 135.3M / 141.2M (+4.4%) | |
+| tables (first 200), 2 threads, nctx 1 / 2 / 4 | 180.0M / 188.4M (+4.7%) / 199.0M (+10.6%) | |
+
+(2-thread figures are thread-cycles summed over both threads: a core's cycles per deal are
+half of that. 1 thread 15.5M against 2 threads 10.45M core cycles per deal: SMT +48%.)
+
+Where the yields go (compile switches YIELD3, YIELDP; NCTX=2 against an NCTX=1 control of the
+same source, set mode, 5 rounds): yields at the three-card table only +4.4%; pattern table
+directory only +5.7%; pattern directory and entry chunks +5.1%; chunks only +5.6%; all
+(default) +2.6%. With 2 contexts the cost is nearly flat in where (and how often) the searches
+hand over: yielding at only every 256th three-card probe (about 4 switches per deal) costs the
+same +4% as at every probe (980 per deal), and L2-to-L3 misses rise 20-26% in every variant.
+So the loss is capacity, not the switch: each live deal's table (directory 2^15 x 16 B plus
+its blocks, roughly 0.6-1 MB) is about the size of L2, and two live deals per thread (four per
+core with SMT) evict each other. The yields hide about what they cost: about 80 extra
+instructions per yield (save/load of the hot state, the stack switch, a mispredicted return)
+against a three-card probe that mostly hits L3. The probes that do miss further out (the
+four-card pattern table: about 4% of cycle samples, ~1,750 probes per deal) are too small a
+target to pay for a second deal's footprint. SMT already overlaps these stalls without the
+footprint or switch costs.
+
+Also tried and dropped:
+- Sharing one transposition table across consecutive deals (the entries are rank-relative, so
+  valid for any deal of the same strain class; reset at 2^15, 2^17 or 2^20 lines): +2.5 to
+  +4% cycles, instructions +0.3-0.4%. Deals share too few positions; the chains only get
+  longer. (So a shared table does not remove the footprint cost of interleaving either.)
+- The four declarers of a strain interleaved on one thread sharing the strain's table (no
+  extra footprint): +7% cycles per table, branch misses +17%; running them together loses the
+  reuse the sequential order gets (later declarers find the earlier declarers' entries).
+
+Kept for re-measuring on other machines (off by default, the default path is unchanged:
+public-set nodes 82,915,440): `DDFAST_NCTX=k` (and `DDFAST_NCTX_CHUNK`, default 4k) makes each
+`solve_parallel` / `solve_tables_parallel` worker interleave k searches (k whole tables for
+tables); `bench_solve tables FILE cpus reps` (ddfast-only table throughput on a set's deals);
+`BENCH_N` (first N problems of a set); per-deal cycles, cache and branch misses in the
+`bench_solve parallel` output; YIELD3 / YIELDP compile switches.
+
+Expectation for servers: EPYC Turin has the same 1 MB L2 per core, so the same result
+(interleaving loses; with 16 threads per CCD sharing 32 MB L3 the evicted lines come back from
+a busier L3, if anything worse). Granite Rapids has 2 MB L2: one thread with two live deals
+might roughly break even, but with SMT on (the target) the core already holds two deals'
+tables, and a third and fourth would spill. Worth one run there (`DDFAST_NCTX=2 bench_solve
+parallel ...` on one core's two threads) before closing it.
+
+### 16c: scheduling the questions across a batch (tp-questions; not merged)
+
+Goal: batch throughput (deals/s and tables/s per physical core with both SMT threads busy);
+latency no longer matters. Measured on core 3 (CPUs 3, 15), alternating A/B against a control
+build (same source, switch off), 7 pairs, other agents loading the machine.
+
+Where the question nodes are (STATS, single problems): public 2.248 questions and 138.2k nodes
+per deal, the fitted guess inside the two-question window for 77.0% of deals; chunk6 (first 1,500)
+2.226 questions, 141.2k nodes, window 78.1%. Questions outside the window hold 6.3% / 4.7% of
+all nodes: the ceiling for any better first question (an oracle saves less, as the in-window
+questions after a miss reuse the table).
+
+- Per-batch calibration of the first guess (shift or per-class correction learned from the
+  deals already solved): no room. The offsets first - value are centred on the window (chunk6:
+  -1: 149, 0: 583, +1: 589, +2: 153), so any shift loses; a batch of a few thousand deals adds
+  nothing to a model fitted on 106k deals. Not built.
+- Step rules that use the first question's cost (a cheap answer means a loose question): a
+  larger second step helps only when the value is two or more beyond the first target (under
+  1% of deals). Not built.
+- Phase scheduling (all first questions, then all follow-ups) would keep every deal's table
+  alive between its questions for no gain in the guess; not built. The test sets hold no
+  repeated deal (or deal + strain), so grouping problems of one deal on a thread has nothing
+  to share there; for tables that grouping is solve_table itself.
+- **Kept: first targets in solve_table from the strain's earlier declarers** (`TGUESS`, default
+  1). North-South's value with the other side on lead moves by 0..+1 when North-South gain the
+  lead, and the same side leading from the other seat nearly always gives the same value: d1
+  (South leads) asks v0+1 first, d2 (West) v0, d3 (North) v1+1. Window, 100 random tables
+  (suits / NT): d1 0.97 / 0.75, d2 0.95 / 0.96, d3 0.99 / 0.95, against 0.80 / 0.62 for the
+  fitted guess. Questions per table 44.84 -> 41.79, nodes per table 1,349,111 -> 1,339,403
+  (-0.7%: the later declarers' questions are cheap, the table is kept). Cycles per table
+  (all threads): 2 threads chunk6 240.2M -> 234.4M (-2.4%), public 170.1M -> 167.0M (-1.8%);
+  1 thread chunk6 192.1M -> 189.5M (-1.4%), public 118.9M -> 117.5M (-1.1%). Tables/s (2 threads):
+  chunk6 25.32 -> 25.96, public 45.17 -> 45.70. Single problems unchanged (public STATS
+  82,915,440 nodes). The earlier strains say little about a strain's first declarer (NT from
+  the suits: window 0.65 against 0.62), so that is left to the fitted guess.
+- Re-weighting the miss costs that pick the first question (kGF_COST, the too-low side
+  scaled 0.6x-1.6x against the too-high side; dev switch, not kept): chunk6 nodes 211.83M at
+  1x, 211.69M at 0.6x (-0.07%), 212.0M at 0.8x, 213.0M at 1.25x, 213.8M at 1.6x. Flat: the
+  table is already at its optimum.
+
+### 16d: first targets in full tables from the same deal (tp-strains, PR #11)
+
+Merged; see the commit message of 9d86e38 and PR #11. In a full table each later declarer's first
+target comes from the strain's results already found: the same side's other declarer (same tricks
+93% of the time), and North-South on lead take as many tricks as when East or West leads, or one
+more (96%); leaders are solved in the order E, W, S, N. Questions per table 44.7 -> 41.7; nodes per
+table -1.3% / -2.5% / -2.3% (seeds 4242, 777, 31337); cycles per table -1.3% / -2.5% against a
+`-DTPGUESS=0` control, -3.3% after rebasing onto main (seed 777, CPU 0, 5 pairs). Ceiling: the first
+declarer of each strain starts with an empty table and costs about 54% of a table's nodes; an
+oracle first target there saves only about 4% of the total, and no bound across leaders or strains
+is provable (North-South on lead taking at least as many tricks fails in about 2 of 2,000 cases).

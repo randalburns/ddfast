@@ -118,6 +118,10 @@ int main(int argc, char** argv) {
       fprintf(stderr, "cannot read %s\n", argv[2]);
       return 2;
     }
+    if (const char* bn = getenv("BENCH_N"); bn && size_t(atol(bn)) < s.problems.size()) {  // the first BENCH_N problems
+      s.problems.resize(size_t(atol(bn)));
+      s.answers.resize(size_t(atol(bn)));
+    }
     const int ci = mode == "parallel" || mode == "tables" ? 5 : 3;  // parallel FILE cpus reps [count]
     if (argc > ci && size_t(atol(argv[ci])) < s.problems.size()) {
       s.problems.resize(size_t(atol(argv[ci])));
@@ -154,25 +158,28 @@ int main(int argc, char** argv) {
     return wrong ? 1 : 0;
   }
   init_or_exit();
-  if (mode == "tables") {  // full tables of the set's deals, ddfast only (no reference check)
+  if (mode == "tables") {  // full tables of the set's deals (one table per problem), ddfast only
     const std::vector<int> cpus = parse_cpus(argc > 3 ? argv[3] : "auto");
     const int reps = argc > 4 ? atoi(argv[4]) : 3;
     std::vector<ddfast::Deal> deals(n);
+    std::vector<ddfast::Table> tabs(n);
     for (size_t i = 0; i < n; i++) memcpy(deals[i].hand, s.problems[i].hand, sizeof deals[i].hand);
-    std::vector<ddfast::Table> tab(n);
-    ddfast::solve_tables_parallel(deals.data(), n < 16 ? n : 16, tab.data(), cpus.data(), int(cpus.size()));  // warm-up
+    ddfast::solve_tables_parallel(deals.data(), n < 16 ? n : 16, tabs.data(), cpus.data(), int(cpus.size()));  // warm-up
+    size_t wrong = 0;
     for (int r = 0; r < reps; r++) {
       std::vector<ddfast::WorkerStats> st;
       const double t0 = now();
-      ddfast::solve_tables_parallel(deals.data(), n, tab.data(), cpus.data(), int(cpus.size()), &st);
+      ddfast::solve_tables_parallel(deals.data(), n, tabs.data(), cpus.data(), int(cpus.size()), &st);
       const double secs = now() - t0;
-      double cyc = 0, ins = 0, cm = 0;
-      for (const auto& w : st) cyc += w.cycles, ins += w.instructions, cm += w.cache_misses;
-      printf("tables, %zu threads: %.1f tables/s  thread-cycles/table %.0f  instructions/table %.0f  cache-misses/table %.0f\n", cpus.size(),
-             n / secs, cyc / n, ins / n, cm / n);
+      for (size_t i = 0; i < n; i++) wrong += tabs[i].tricks[s.problems[i].trump][s.problems[i].declarer] != s.answers[i];
+      double cyc = 0, ins = 0, cm = 0, bm = 0;
+      for (const auto& w : st) cyc += w.cycles, ins += w.instructions, cm += w.cache_misses, bm += w.branch_misses;
+      printf("tables, %zu threads: %.2f tables/s  per table: thread-cycles %.0f  instructions %.0f  cache-misses %.0f  branch-misses %.0f\n",
+             cpus.size(), n / secs, cyc / n, ins / n, cm / n, bm / n);
     }
     ddfast::stop_pool();
-    return 0;
+    printf("%s\n", wrong ? "WRONG" : "all correct");
+    return wrong ? 1 : 0;
   }
   if (mode == "parallel") {
     const std::vector<int> cpus = parse_cpus(argc > 3 ? argv[3] : "auto");
@@ -186,9 +193,10 @@ int main(int argc, char** argv) {
       ddfast::solve_parallel(s.problems.data(), n, got.data(), cpus.data(), int(cpus.size()), ddfast::BatchOrder::Predicted, &st);
       const double secs = now() - t0;
       for (size_t i = 0; i < n; i++) wrong += got[i] != s.answers[i];
-      double cyc = 0, ins = 0, cm = 0, tlb = 0;
-      for (const auto& w : st) cyc += w.cycles, ins += w.instructions, cm += w.cache_misses, tlb += w.dtlb_misses;
-      printf("parallel, %zu threads: %.1f deals/s  thread-cycles/deal %.0f  instructions/deal %.0f  cache-misses/deal %.0f  dtlb/deal %.0f\n", cpus.size(), n / secs, cyc / n, ins / n, cm / n, tlb / n);
+      double cyc = 0, ins = 0, cm = 0, bm = 0, tlb = 0;
+      for (const auto& w : st) cyc += w.cycles, ins += w.instructions, cm += w.cache_misses, bm += w.branch_misses, tlb += w.dtlb_misses;
+      printf("parallel, %zu threads: %.1f deals/s  per deal: thread-cycles %.0f  instructions %.0f  cache-misses %.0f  branch-misses %.0f  dtlb %.0f\n",
+             cpus.size(), n / secs, cyc / n, ins / n, cm / n, bm / n, tlb / n);
     }
     ddfast::stop_pool();
     printf("%s\n", wrong ? "WRONG" : "all correct");
