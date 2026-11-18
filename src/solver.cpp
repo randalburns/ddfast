@@ -58,8 +58,10 @@ inline void spread_nibbles(u64 x, uint8_t* out) {
 #if DDCLAIM_X86
   _mm_storeu_si128((__m128i*)out, _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)x), _mm_cvtsi64_si128((long long)(x >> 4)))));
 #else
-  const uint8x8_t v = vcreate_u8(x);
-  vst1q_u8(out, vandq_u8(vdupq_n_u8(15), vcombine_u8(vzip1_u8(v, vshr_n_u8(v, 4)), vzip2_u8(v, vshr_n_u8(v, 4)))));
+  namespace hn = hwy::HWY_NAMESPACE;
+  const hn::Full128<uint8_t> d8;
+  const auto v = hn::BitCast(d8, hn::Set(hn::Full128<uint64_t>(), x));
+  hn::StoreU(hn::And(hn::InterleaveLower(d8, v, hn::ShiftRight<4>(v)), hn::Set(d8, uint8_t(15))), d8, out);
 #endif
 }
 
@@ -482,13 +484,11 @@ __attribute__((always_inline)) inline int nq_quick(const NB& b, int hand, int n,
     const unsigned sbP = _mm256_test_epi64_mask(_mm256_load_si256((const __m256i*)b.sbv), vP);
 #else
     // The lengths (byte 4 * hand + suit) that are nonzero, and at least 2, as bit masks.
-    const uint8x16_t lv = vld1q_u8(b.ln);
-    const uint8x16_t bitv = vreinterpretq_u8_u64(vdupq_n_u64(0x8040201008040201ull));
-    auto mask16 = [&](uint8x16_t m) {
-      const uint8x16_t t = vandq_u8(m, bitv);
-      return unsigned(vaddv_u8(vget_low_u8(t))) | unsigned(vaddv_u8(vget_high_u8(t))) << 8;
-    };
-    const unsigned nzm = mask16(vtstq_u8(lv, lv)), g2m = mask16(vcgtq_u8(lv, vdupq_n_u8(1)));
+    namespace hn = hwy::HWY_NAMESPACE;
+    const hn::Full128<uint8_t> d8;
+    const auto lv = hn::LoadU(d8, b.ln);
+    const unsigned nzm = unsigned(hn::BitsFromMask(d8, hn::Ne(lv, hn::Zero(d8))));
+    const unsigned g2m = unsigned(hn::BitsFromMask(d8, hn::Gt(lv, hn::Set(d8, uint8_t(1)))));
     const unsigned topP = unsigned((b.wb[0] & b.h[P]) != 0) | unsigned((b.wb[1] & b.h[P]) != 0) << 1 | unsigned((b.wb[2] & b.h[P]) != 0) << 2 | unsigned((b.wb[3] & b.h[P]) != 0) << 3;
     const u64 hh = b.h[hand];
     const unsigned topH = unsigned((b.wb[0] & hh) != 0) | unsigned((b.wb[1] & hh) != 0) << 1 | unsigned((b.wb[2] & hh) != 0) << 2 | unsigned((b.wb[3] & hh) != 0) << 3;
@@ -1258,13 +1258,16 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
 }
 
 #if DDCLAIM_ARM
-// native_order for NEON: the per-suit part as in the AVX-512 version below (one 32-bit lane
-// per suit, masks as all-ones lanes), then a branch-free scalar loop over the cards, which
-// looks up each card's class in per-suit tables (in place of AVX-512's compress and permutes).
+// native_order with Highway: the per-suit part as in the AVX-512 version below (one 32-bit lane
+// per suit in 128-bit vectors), then a branch-free scalar loop over the cards, which looks up
+// each card's class in per-suit tables (in place of AVX-512's compress and permutes).
 template <bool NT>
-inline int native_order_neon(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
-  using V = int32x4_t;
-  using M = uint32x4_t;
+inline int native_order_hwy(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
+  namespace hn = hwy::HWY_NAMESPACE;
+  const hn::Full128<int32_t> di;
+  const hn::Full128<uint32_t> du;
+  using V = hn::Vec<decltype(di)>;
+  using M = hn::Mask<decltype(di)>;
   constexpr u64 TRL = LANE(3);
   const int P = L ^ 2, A = (L + 1) & 3, B = (L + 3) & 3;
   const u64 hl = H[L], hp = H[P], ha = H[A], hb = H[B];
@@ -1272,62 +1275,65 @@ inline int native_order_neon(int n, int L, u64 hint, u64 all, u64* cards, uint16
   const u64 kc = S->killer[n][0] & hl;
   u64 seq_all;
   const u64 hd_all = ddport::run_heads(hl, all, &seq_all);
-  auto vs = [](int x) { return vdupq_n_s32(x); };
-  auto ld = [](u64 h) { return vreinterpretq_s32_u32(vmovl_u16(vcreate_u16(h))); };
-  auto hib = [](V v) {  // the highest bit of each lane (0 for 0)
-    const int32x4_t sh = vnegq_s32(vreinterpretq_s32_u32(vclzq_u32(vreinterpretq_u32_s32(v))));
-    return vreinterpretq_s32_u32(vshlq_u32(vdupq_n_u32(0x80000000u), sh));
+  auto vs = [&](int x) { return hn::Set(di, x); };
+  auto ld = [&](u64 h) {
+    return hn::BitCast(di, hn::PromoteTo(du, hn::BitCast(hn::Full64<uint16_t>(), hn::Set(hn::Full64<uint64_t>(), h))));
   };
-  auto sel = [](M m, V a, V b) { return vbslq_s32(m, a, b); };  // m ? a : b
-  auto eq = [](V a, int k) { return vceqq_s32(a, vdupq_n_s32(k)); };
-  auto tst = [](V a, V b) { return vtstq_s32(a, b); };
-  auto pc = [](V v) { return vreinterpretq_s32_u16(vpaddlq_u8(vcntq_u8(vreinterpretq_u8_s32(v)))); };
-  auto mk = [](bool b) { return vdupq_n_u32(b ? ~0u : 0u); };
-  auto add = [](V a, int k) { return vaddq_s32(a, vdupq_n_s32(k)); };
-  auto div = [](V a, int mul) { return vreinterpretq_s32_u32(vshrq_n_u32(vreinterpretq_u32_s32(vmulq_s32(a, vdupq_n_s32(mul))), 18)); };
+  const auto top = hn::Set(du, 0x80000000u), c31 = hn::Set(du, 31u);
+  auto hib = [&](V v) {  // the highest bit of each lane (0 for 0); shift counts stay below 32
+    const auto u = hn::BitCast(du, v);
+    return hn::BitCast(di, hn::And(u, hn::Shr(top, hn::Min(hn::LeadingZeroCount(u), c31))));
+  };
+  auto sel = [](M m, V a, V b) { return hn::IfThenElse(m, a, b); };  // m ? a : b
+  auto eq = [&](V a, int k) { return hn::Eq(a, hn::Set(di, k)); };
+  auto tst = [&](V a, V b) { return hn::Ne(hn::And(a, b), hn::Zero(di)); };
+  auto pc = [&](V v) { return hn::BitCast(di, hn::PopulationCount(hn::BitCast(du, v))); };
+  auto mk = [&](bool b) { return hn::MaskFromVec(hn::Set(di, b ? -1 : 0)); };
+  auto add = [&](V a, int k) { return hn::Add(a, hn::Set(di, k)); };
+  auto div = [&](V a, int mul) { return hn::BitCast(di, hn::ShiftRight<18>(hn::BitCast(du, hn::Mul(a, hn::Set(di, mul))))); };
+  auto AND = [](M a, M b) { return hn::And(a, b); };
+  auto OR = [](M a, M b) { return hn::Or(a, b); };
+  auto NOT = [](M a) { return hn::Not(a); };
+  auto ANDN = [](M a, M b) { return hn::AndNot(b, a); };  // a & ~b
   const V X = ld(all), VL = ld(hl), VP = ld(hp), VA = ld(ha), VB = ld(hb);
-  // Lane popcounts: the per-16-bit sums of the byte counts (the high halves are zero).
-  const V lenA = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VA))));
-  const V lenB = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VB))));
-  const V lenP = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VP))));
-  const V top1 = hib(X), X2 = veorq_s32(X, top1), top2 = hib(X2), top3 = hib(veorq_s32(X2, top2));
+  const V lenA = pc(VA), lenB = pc(VB), lenP = pc(VP);
+  const V top1 = hib(X), X2 = hn::Xor(X, top1), top2 = hib(X2), top3 = hib(hn::Xor(X2, top2));
   const M w1L = tst(top1, VL), w1P = tst(top1, VP), w1A = tst(top1, VA), w1B = tst(top1, VB);
   const M w2L = tst(top2, VL), w2P = tst(top2, VP), w2A = tst(top2, VA), w2B = tst(top2, VB);
   const M h3L = tst(top3, VL), h3P = tst(top3, VP);
   const M lA0 = eq(lenA, 0), lB0 = eq(lenB, 0), lP0 = eq(lenP, 0), lA1 = eq(lenA, 1), lB1 = eq(lenB, 1), lP1 = eq(lenP, 1);
-  const M lPg1 = vcgtq_s32(lenP, vs(1));
-  const M sing = (lA1 & w1A) | (lB1 & w1B);
-  const M p_over = vcgtq_u32(vreinterpretq_u32_s32(VP), vreinterpretq_u32_s32(vorrq_s32(VA, VB)));
-  const M third13 = ((w2L & h3P) | (w2P & h3L)) & lPg1;
-  const V cAB = vshlq_n_s32(vaddq_s32(vshlq_n_s32(sel(lA0, vs(n), lenA), 2), vshlq_n_s32(sel(lB0, vs(n), lenB), 2)), 5);
+  const M lPg1 = hn::Gt(lenP, vs(1));
+  const M sing = OR(AND(lA1, w1A), AND(lB1, w1B));
+  const M p_over = hn::RebindMask(di, hn::Gt(hn::BitCast(du, VP), hn::BitCast(du, hn::Or(VA, VB))));
+  const M third13 = AND(OR(AND(w2L, h3P), AND(w2P, h3L)), lPg1);
+  const V cAB = hn::ShiftLeft<5>(hn::Add(hn::ShiftLeft<2>(sel(lA0, vs(n), lenA)), hn::ShiftLeft<2>(sel(lB0, vs(n), lenB))));
   V B0, B1, B2, B3, R0, R1, R2, R3, K2, K3, HW, HN, KW, KN;
-  M W0, Wo;
+  M W0 = mk(true), Wo = mk(false);
   const V zero = vs(0), one = vs(1);
   if (trumps) {
-    const M side = {~0u, ~0u, ~0u, 0u};
+    const M side = hn::FirstN(di, 3);
     const M mtA = mk(ha & TRL), mtB = mk(hb & TRL), mtP = mk(hp & TRL);
     const u64 tP = hp & TRL, tA = ha & TRL, tB = hb & TRL;
     const M mPA = mk(tP > tA), mPB = mk(tP > tB), mPAB = mk(tP > (tA | tB));
-    const M ra = lA0 & mtA, rb = lB0 & mtB;
-    V bonus = sel(side & (ra | rb), vs(-12), zero);
-    bonus = vaddq_s32(bonus, sel(side & lP0 & mtP & ~lB0, vs(17), zero));
-    const M wB = w1B | w2B;
-    bonus = vaddq_s32(bonus, sel(wB & ~lB1, vs(-12), sel(~wB & w1A & w2P & ~lP1, vs(27), zero)));
-    const V lenL = vreinterpretq_s32_u32(vpaddlq_u16(vreinterpretq_u16_s32(pc(VL))));
-    const M lL1 = eq(lenL, 1);
-    bonus = vaddq_s32(bonus, sel(side & lL1 & mk(hl & TRL) & lPg1 & w1P, vs(19), zero));
-    const V swd = vsubq_s32(bonus, div(cAB, 20165));  // /13
-    const M opp_follow = ~ra & ~rb;
-    const M m1 = ~lP0 | ~mtP;
-    const M wt_side = (m1 & opp_follow) | (~m1 & (~lA0 | mPA) & (~lB0 | mPB));
-    W0 = ~side | wt_side;
-    const M rcase = (ra & rb & mPAB) | (ra & ~rb & mPA) | (~ra & rb & mPB) | (~ra & ~rb);
-    const M wo_side = (p_over & opp_follow) | (~p_over & lP0 & mtP & rcase);
-    Wo = (~side & p_over) | (side & wo_side);
-    const V d2 = vaddq_s32(swd, sel(w2P & h3P, vs(20), sel(third13, vs(13), zero)));
+    const M ra = AND(lA0, mtA), rb = AND(lB0, mtB);
+    V bonus = sel(AND(side, OR(ra, rb)), vs(-12), zero);
+    bonus = hn::Add(bonus, sel(ANDN(AND(AND(side, lP0), mtP), lB0), vs(17), zero));
+    const M wB = OR(w1B, w2B);
+    bonus = hn::Add(bonus, sel(ANDN(wB, lB1), vs(-12), sel(ANDN(AND(ANDN(w1A, wB), w2P), lP1), vs(27), zero)));
+    const M lL1 = eq(pc(VL), 1);
+    bonus = hn::Add(bonus, sel(AND(AND(AND(side, lL1), mk(hl & TRL)), AND(lPg1, w1P)), vs(19), zero));
+    const V swd = hn::Sub(bonus, div(cAB, 20165));  // /13
+    const M opp_follow = NOT(OR(ra, rb));
+    const M m1 = NOT(AND(lP0, mtP));
+    const M wt_side = OR(AND(m1, opp_follow), ANDN(AND(OR(NOT(lA0), mPA), OR(NOT(lB0), mPB)), m1));
+    W0 = OR(NOT(side), wt_side);
+    const M rcase = OR(OR(AND(AND(ra, rb), mPAB), AND(ANDN(ra, rb), mPA)), OR(AND(ANDN(rb, ra), mPB), opp_follow));
+    const M wo_side = OR(AND(p_over, opp_follow), ANDN(AND(AND(lP0, mtP), rcase), p_over));
+    Wo = OR(ANDN(p_over, side), AND(side, wo_side));
+    const V d2 = hn::Add(swd, sel(AND(w2P, h3P), vs(20), sel(third13, vs(13), zero)));
     B0 = sel(W0, sel(w2P, add(swd, 48), add(swd, 31)), sel(w2P, add(d2, 33), add(d2, 38)));
     R0 = sel(w2P, one, zero);
-    const M Sm = sing | w1L | w1P;
+    const M Sm = OR(OR(sing, w1L), w1P);
     const V BSw = sel(sing, add(swd, 35), sel(w1L, sel(w2P, add(swd, 48), add(swd, -3)), sel(w2L, add(swd, 42), add(swd, 28))));
     const V BSn = sel(sing, add(d2, 2), sel(w1L, sel(w2P, add(d2, 33), add(d2, -14)), add(d2, 34)));
     const V BS = sel(Wo, BSw, BSn);
@@ -1335,40 +1341,38 @@ inline int native_order_neon(int n, int L, u64 hint, u64 all, u64* cards, uint16
     R1 = sel(Sm, one, zero);
     B2 = sel(Sm, BS, sel(Wo, add(swd, 22), add(d2, 17)));
     B3 = sel(Sm, BS, sel(Wo, add(swd, 11), add(d2, 17)));
-    R2 = R3 = sel(Sm | Wo, one, zero);
-    K2 = K3 = sel(Sm | Wo, zero, vs(-1));
+    R2 = R3 = sel(OR(Sm, Wo), one, zero);
+    K2 = K3 = sel(OR(Sm, Wo), zero, vs(-1));
     HW = vs(55 + HX), HN = vs(18 + HX), KW = vs(18), KN = zero;
   } else {
-    const V swd = vsubq_s32(sel(lP0, vs(-9), zero), div(cAB, 13798));  // /19
-    const V dw = vaddq_s32(swd, sel(w2B, sel(lB1, zero, vs(-1)), sel(w2A, sel(lA1, vs(16), vs(22)), zero)));
-    const V addw = sel((~w2A | lA1) & (~w2B | lB1), vs(45), vs(18));
-    V dn = vaddq_s32(swd, sel(w1B | w2B, sel(lB1, zero, vs(-10)), sel(w1A & w2P, sel(lP1, zero, vs(31)), zero)));
-    dn = vaddq_s32(dn, sel(w2P & h3P, vs(35), sel(third13, vs(25), zero)));
-    const V bw = vaddq_s32(dw, addw);
-    W0 = vdupq_n_u32(~0u), Wo = p_over;
-    const M Sm = sing | w1L;
+    const V swd = hn::Sub(sel(lP0, vs(-9), zero), div(cAB, 13798));  // /19
+    const V dw = hn::Add(swd, sel(w2B, sel(lB1, zero, vs(-1)), sel(w2A, sel(lA1, vs(16), vs(22)), zero)));
+    const V addw = sel(AND(OR(NOT(w2A), lA1), OR(NOT(w2B), lB1)), vs(45), vs(18));
+    V dn = hn::Add(swd, sel(OR(w1B, w2B), sel(lB1, zero, vs(-10)), sel(AND(w1A, w2P), sel(lP1, zero, vs(31)), zero)));
+    dn = hn::Add(dn, sel(AND(w2P, h3P), vs(35), sel(third13, vs(25), zero)));
+    const V bw = hn::Add(dw, addw);
+    W0 = mk(true), Wo = p_over;
+    const M Sm = OR(sing, w1L);
     const V Snt = sel(sing, add(dn, 28), add(dn, -17));
     B0 = bw, R0 = one;
     B1 = sel(p_over, bw, sel(Sm, Snt, add(dn, 48)));
-    R1 = sel(p_over | Sm, one, zero);
+    R1 = sel(OR(p_over, Sm), one, zero);
     B2 = sel(p_over, bw, sel(Sm, Snt, add(dn, 29)));
-    R2 = sel(p_over | Sm, one, vs(-1));
+    R2 = sel(OR(p_over, Sm), one, vs(-1));
     B3 = sel(p_over, bw, sel(Sm, Snt, add(dn, 12)));
     R3 = one;
     K2 = K3 = zero;
     HW = vs(126 + HX), HN = vs(47 + HX), KW = vs(32), KN = vs(19);
   }
-  // Per class (top card, second card heading a sequence, other sequence head, other card) and
-  // suit: base weight, coefficients on rr and on rank, hint and killer bonuses.
   alignas(16) int32_t tb[16], tr[16], tk[16], th[16], tkb[16];
   const V c2000 = vs(2000);
-  vst1q_s32(tb, vaddq_s32(B0, c2000)), vst1q_s32(tb + 4, vaddq_s32(B1, c2000));
-  vst1q_s32(tb + 8, vaddq_s32(B2, c2000)), vst1q_s32(tb + 12, vaddq_s32(B3, c2000));
-  vst1q_s32(tr, R0), vst1q_s32(tr + 4, R1), vst1q_s32(tr + 8, R2), vst1q_s32(tr + 12, R3);
-  vst1q_s32(tk, zero), vst1q_s32(tk + 4, zero), vst1q_s32(tk + 8, K2), vst1q_s32(tk + 12, K3);
+  hn::Store(hn::Add(B0, c2000), di, tb), hn::Store(hn::Add(B1, c2000), di, tb + 4);
+  hn::Store(hn::Add(B2, c2000), di, tb + 8), hn::Store(hn::Add(B3, c2000), di, tb + 12);
+  hn::Store(R0, di, tr), hn::Store(R1, di, tr + 4), hn::Store(R2, di, tr + 8), hn::Store(R3, di, tr + 12);
+  hn::Store(zero, di, tk), hn::Store(zero, di, tk + 4), hn::Store(K2, di, tk + 8), hn::Store(K3, di, tk + 12);
   const V hO = sel(Wo, HW, HN), kO = sel(Wo, KW, KN);
-  vst1q_s32(th, sel(W0, HW, HN)), vst1q_s32(th + 4, hO), vst1q_s32(th + 8, hO), vst1q_s32(th + 12, hO);
-  vst1q_s32(tkb, sel(W0, KW, KN)), vst1q_s32(tkb + 4, kO), vst1q_s32(tkb + 8, kO), vst1q_s32(tkb + 12, kO);
+  hn::Store(sel(W0, HW, HN), di, th), hn::Store(hO, di, th + 4), hn::Store(hO, di, th + 8), hn::Store(hO, di, th + 12);
+  hn::Store(sel(W0, KW, KN), di, tkb), hn::Store(kO, di, tkb + 4), hn::Store(kO, di, tkb + 8), hn::Store(kO, di, tkb + 12);
   int nm = 0;
   for (int l = 0; l < 4; l++) {
     u64 h = hd_all & LANE(l);
@@ -1403,7 +1407,7 @@ inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* k
 #if defined(OLD_ORDER)
   return native_order_scalar<NT>(n, L, hint, all, cards, key);
 #elif DDCLAIM_ARM
-  return native_order_neon<NT>(n, L, hint, all, cards, key);
+  return native_order_hwy<NT>(n, L, hint, all, cards, key);
 #else
   using V = __m128i;
   using M = __mmask8;
@@ -1798,26 +1802,28 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
   }
   return best;
 }
-#else
+#else  // DDCLAIM_ARM: Highway
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
-  const uint64x2_t vo = vdupq_n_u64(own), vd = vdupq_n_u64(dec);
-  uint64x2_t r[4];
-  for (int i = 0; i < 4; i++) {
-    const uint64x2_t vb = vld1q_u64(e + 8 + 2 * i);
-    r[i] = vandq_u64(vceqq_u64(vandq_u64(vb, vo), vld1q_u64(e + 2 * i)), vtstq_u64(vb, vd));
-  }
-  return ddport::movemask8x64(r[0], r[1], r[2], r[3]);
+  namespace hn = hwy::HWY_NAMESPACE;
+  const ddport::D64 d;
+  const auto vo = hn::Set(d, own), vd = hn::Set(d, dec), z = hn::Zero(d);
+  auto m = [&](int i) {
+    const auto vb = hn::Load(d, e + 8 + 2 * i);
+    return hn::And(hn::Eq(hn::And(vb, vo), hn::Load(d, e + 2 * i)), hn::Ne(hn::And(vb, vd), z));
+  };
+  return ddport::movemask8x64(m(0), m(1), m(2), m(3));
 }
 inline unsigned tt_match_wide(const u64* e, u64 ewq, u64 swq, int target) {
-  const uint64x2_t ve = vdupq_n_u64(ewq), vs = vdupq_n_u64(swq), vw = vdupq_n_u64(W52), vt = vdupq_n_u64(u64(target)), f = vdupq_n_u64(15);
-  uint64x2_t r[4];
-  for (int i = 0; i < 4; i++) {
-    const uint64x2_t v0 = vld1q_u64(e + 2 * i), vm = vandq_u64(v0, vw);
-    const uint64x2_t k = vandq_u64(vceqq_u64(vandq_u64(vm, ve), vld1q_u64(e + 8 + 2 * i)), vceqq_u64(vandq_u64(vm, vs), vld1q_u64(e + 16 + 2 * i)));
-    const uint64x2_t lo = vandq_u64(vshrq_n_u64(v0, 52), f), hi = vandq_u64(vshrq_n_u64(v0, 56), f);
-    r[i] = vandq_u64(k, vorrq_u64(vcgeq_u64(lo, vt), vcltq_u64(hi, vt)));
-  }
-  return ddport::movemask8x64(r[0], r[1], r[2], r[3]);
+  namespace hn = hwy::HWY_NAMESPACE;
+  const ddport::D64 d;
+  const auto ve = hn::Set(d, ewq), vs = hn::Set(d, swq), vw = hn::Set(d, W52), vt = hn::Set(d, u64(target)), f = hn::Set(d, u64(15));
+  auto m = [&](int i) {
+    const auto v0 = hn::Load(d, e + 2 * i), vm = hn::And(v0, vw);
+    const auto k = hn::And(hn::Eq(hn::And(vm, ve), hn::Load(d, e + 8 + 2 * i)), hn::Eq(hn::And(vm, vs), hn::Load(d, e + 16 + 2 * i)));
+    const auto lo = hn::And(hn::ShiftRight<52>(v0), f), hi = hn::And(hn::ShiftRight<56>(v0), f);
+    return hn::And(k, hn::Or(hn::Ge(lo, vt), hn::Lt(hi, vt)));
+  };
+  return ddport::movemask8x64(m(0), m(1), m(2), m(3));
 }
 inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
   u64 best = ~u64(0);
@@ -1945,7 +1951,7 @@ struct alignas(64) SpinLock {
   void lock() {
     for (;;) {
       if (!f.exchange(true, std::memory_order_acquire)) return;
-      while (f.load(std::memory_order_relaxed)) _mm_pause();
+      while (f.load(std::memory_order_relaxed)) ddport::cpu_relax();
     }
   }
   void unlock() { f.store(false, std::memory_order_release); }

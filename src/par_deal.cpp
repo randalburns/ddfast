@@ -21,7 +21,6 @@
 #include <condition_variable>
 #include <mutex>
 
-#include <x86intrin.h>
 
 namespace {
 
@@ -172,19 +171,19 @@ struct DealPool {
     while (result.load(std::memory_order_acquire) < 0) {
       Item it;
       if (!take(it)) {
-        _mm_pause();
+        ddport::cpu_relax();
         continue;
       }
       LeadState& l = ls[it.lead];
       if (l.stop.load(std::memory_order_relaxed)) continue;
       g_hot.stop = &l.stop;
-      const u64 i0 = g_mnodes, c0 = __rdtsc();
+      const u64 i0 = g_mnodes, c0 = ddport::ticks();
       u64 rest = 0;
       const int r = pos.trump == 4 ? run_item<true>(L, target, it.c, it.mask, it.ybw, rest)
                                    : run_item<false>(L, target, it.c, it.mask, it.ybw, rest);
       g_hot.stop = &g_never_stop;
       (r < 0 ? waste : useful).fetch_add(g_mnodes - i0, std::memory_order_relaxed);
-      (r < 0 ? busy_waste : busy).fetch_add(__rdtsc() - c0, std::memory_order_relaxed);
+      (r < 0 ? busy_waste : busy).fetch_add(ddport::ticks() - c0, std::memory_order_relaxed);
       if (r < 0) continue;
       if (r == 1) {
         if (rest) {  // the lead's other replies, one item each, ahead of the leads not started
@@ -207,7 +206,7 @@ struct DealPool {
       // Spin for the next question, then sleep.
       const auto t0 = std::chrono::steady_clock::now();
       for (int i = 0; round.load(std::memory_order_acquire) == seen; i++) {
-        _mm_pause();
+        ddport::cpu_relax();
         if ((i & 1023) == 1023 && std::chrono::steady_clock::now() - t0 > std::chrono::microseconds(PAR_SPIN_US)) {
           std::unique_lock<std::mutex> lk(m);
           sleepers.fetch_add(1);
@@ -266,15 +265,15 @@ struct DealPool {
     refuted.store(0, std::memory_order_relaxed);
     result.store(-1, std::memory_order_relaxed);
     active.store(int(cpus.size()) - 1, std::memory_order_relaxed);
-    const u64 w0 = __rdtsc();
+    const u64 w0 = ddport::ticks();
     round.fetch_add(1);  // seq_cst: publishes the question (and orders the sleepers check)
     if (sleepers.load() > 0) {
       std::lock_guard<std::mutex> lk(m);
       cv.notify_all();
     }
     work();
-    while (active.load(std::memory_order_acquire) > 0) _mm_pause();
-    wall.fetch_add((__rdtsc() - w0) * cpus.size(), std::memory_order_relaxed);
+    while (active.load(std::memory_order_acquire) > 0) ddport::cpu_relax();
+    wall.fetch_add((ddport::ticks() - w0) * cpus.size(), std::memory_order_relaxed);
     const int r = result.load();
     if (r == !(L & 1)) {  // the root leader's side reached t: remember the cutting lead
       for (int i = 0; i < nlead; i++)
