@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>One Word per Hand</title>
+<title>One Word per Hand (with pext/pdep)</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
 /* Layout: one reading column (~68ch) with figures and code allowed to run wider; tables scroll inside their own box. */
@@ -95,12 +95,13 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: v
 ul { padding-left: 20px; margin: 8px 0; }
 li { margin: 4px 0; }
 </style>
-
+</head>
+<body>
 <main>
 <header>
   <div class="eyebrow"><a href="./">ddfast design</a> &#183; hand representation</div>
-  <h1>One Word per Hand</h1>
-  <p class="lede">In ddfast each bridge hand is a single 64-bit integer. Following suit, finding the playable cards and deciding a trick are each a few bit operations on four such words.</p>
+  <h1>One Word per Hand <span style="white-space: nowrap;">(with pext/pdep)</span></h1>
+  <p class="lede">In ddfast each bridge hand is a single 64-bit integer. Following suit, finding the playable cards and deciding a trick are each a few bit operations on four such words. Two instructions make it pay: <code>pext</code> packs the cards still in play into adjacent bits, so that the played cards drop out and only the order of the rest matters, and <code>pdep</code> puts a result back in place.</p>
 </header>
 
 <div class="facts">
@@ -222,7 +223,21 @@ inline void trick_step(u64 x, int s, u64&amp; best, int&amp; bw, bool&amp; ranke
 <pre><code>inline void play(int s, u64 c) { H[s] ^= c; LENS -= 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }
 inline void unplay(int s, u64 c) { H[s] ^= c; LENS += 1ull &lt;&lt; (16 * s + 4 * suit_of(c)); }</code></pre>
 <p class="src">src/solver.cpp (lead() and follow() write the same two lines inline)</p>
-<p>Nothing else needs updating. The cards in play, the top cards of each suit, the runs and the winners are all recomputed from the four words when they are needed. DDS, by contrast, keeps per-suit holdings, lengths and the top three cards of every suit up to date at each node. ddfast's bounds and lead weights are DDS's, rewritten to read the four words directly.</p>
+<p>Worked: North plays the &#9824;T. The hand word goes from <code>0x1014082006021988</code> to <code>0x1014082006021888</code> (bit 8 of the spade lane cleared), and North's lane of <code>LENS</code> from <code>0x3235</code> to <code>0x3234</code> (five spades become four). Taking the card back restores both.</p>
+<p>Nothing else needs updating. The cards in play, the top cards of each suit, the runs and the winners are all recomputed from the four words when they are needed.</p>
+<p>DDS, by contrast, keeps a record like this up to date at every node, and its bounds and move ordering read it:</p>
+<pre><code>struct Pos {
+  unsigned short rank_in_suit[4][4];  // holdings now
+  unsigned short aggr[4];             // all hands' cards of each suit now
+  unsigned char length[4][4];
+  HighCardType winner[4], second_best[4];  // top two cards of each suit at trick start
+  HighCardType third[4];                   // the third-best card of each suit now
+  int tricks_max;                          // tricks North-South have
+  unsigned short win_ranks[4];             // out: the cards a bound depends on
+  MoveType lead;                           // second hand: the card led
+};</code></pre>
+<p class="src">src/dds_port.hpp, ddfast's line-by-line port of DDS</p>
+<p>ddfast never builds this record in its search. Its bounds and lead weights are DDS's, rewritten to read the four words directly: the top cards come from a count of leading zeros in each suit, their owners from bit tests, and the lengths from <code>LENS</code>. So going down one card in the search and coming back costs two word updates each way, whatever the position.</p>
 
 <h2>It depends on pext and pdep</h2>
 <p>Packing the cards in play with <code>pext</code> and unpacking with <code>pdep</code> is what makes runs, table keys and lookups cheap. On x86 each is one instruction (BMI2; the build also needs AVX-512, so Zen 4/5 or Intel Ice Lake and later). Arm has neither. There ddfast emulates them a byte at a time through two 64 KB tables, about 50 instructions for what is one on x86, and the run finder avoids them with an add-and-carry trick on bit-reversed words:</p>
@@ -251,5 +266,5 @@ inline void unplay(int s, u64 c) { H[s] ^= c; LENS += 1ull &lt;&lt; (16 * s + 4 
 <p>The representation pays only with fast <code>pext</code>/<code>pdep</code>. On an Apple M5, with the byte tables, ddfast runs about 55M instructions per deal against 40M on x86, yet takes about as many cycles (15.5M); it is 3.1&#215; DDS there.</p>
 
 </main>
-
+</body>
 </html>

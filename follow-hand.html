@@ -144,6 +144,14 @@ li { margin: 4px 0; }
 </div>
 <p>The rules only change the order in which cards are tried, so the answers stay exact. In the examples, South leads, West plays second, North (dummy) third and East fourth; the highlighted card is the rule's pick. Each example was checked by running ddfast's own code on the hands shown.</p>
 
+<h2>Why the rules are cheap</h2>
+<p>DDS's weights need a record of the position (each hand's holdings and lengths, and the top three cards of every suit with their owners), a list of moves, and a weight worked out for every card in one of eleven functions. The rules need none of that:</p>
+<ul>
+<li><b>Each test is one compare.</b> "Can partner beat dummy's top card?" compares two hand words masked to the suit led.</li>
+<li><b>Each choice is one bit scan.</b> "My lowest card above dummy's top" is a mask and a count of trailing zeros.</li>
+<li><b>Only the first card is chosen.</b> The others are simply the lowest or highest bit left in the candidate mask, with no list and no sort.</li>
+</ul>
+
 <h2>Second hand</h2>
 <p>The rules, in the order the code applies them:</p>
 <ol>
