@@ -3110,12 +3110,12 @@ void run_batch(const ddcore::Position* positions, size_t count, uint8_t* tricks,
 namespace ddfast::detail {
 
 
-void init(const char* dir) {
+void init(const char* dir, bool map_tables) {
   ensure_state();
   // The endgame tables: the two-card table (built in memory), the three-card table
   // and the four-card pattern table, loaded from the table directory or built there.
   const char* lv = getenv("DDFAST_TABLE_LEVELS");
-  ddcore::tables::init_tables(dir, lv && *lv ? atoi(lv) : 1);
+  ddcore::tables::init_tables(dir, lv && *lv ? atoi(lv) : 1, map_tables);
   ddcore::tables::attach();  // this file's copy of the table state (see tables.hpp)
   if (getenv("LEAN_NOP4")) g_pt[0].use = false;
   if (getenv("LEAN_NOT3")) g_use3 = false;

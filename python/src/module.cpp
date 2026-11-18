@@ -125,16 +125,17 @@ NB_MODULE(_ddfast, m) {
 
   m.def(
       "init",
-      [](nb::object table_dir) {
+      [](nb::object table_dir, bool map_tables) {
         std::string dir = table_dir.is_none() ? std::string() : nb::cast<std::string>(table_dir);
         nb::gil_scoped_release release;
-        ddfast_compat::ensure_init(dir.empty() ? nullptr : dir.c_str());
+        ddfast_compat::ensure_init(dir.empty() ? nullptr : dir.c_str(), map_tables);
       },
-      "table_dir"_a = nb::none(),
+      "table_dir"_a = nb::none(), "map_tables"_a = false,
       "Load the endgame tables (about 1.2 GB) from table_dir, else $DDFAST_TABLES, else build/tables "
       "under the current directory, building them there first if missing (a few minutes, once). "
       "Called automatically by the first solve; call it yourself to choose the directory or the "
-      "moment.");
+      "moment. map_tables=True (or DDFAST_TABLE_MAP=1 in the environment) maps the table files "
+      "instead of reading them in, so that all processes using them share one copy.");
 
   m.def(
       "solve_board_pbn",

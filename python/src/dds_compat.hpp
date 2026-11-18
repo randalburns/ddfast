@@ -30,8 +30,8 @@ struct Future {
   int score[13] = {};
 };
 
-// Loads the endgame tables once (thread-safe). table_dir as for ddfast::init().
-void ensure_init(const char* table_dir = nullptr);
+// Loads the endgame tables once (thread-safe). table_dir and map_tables as for ddfast::init().
+void ensure_init(const char* table_dir = nullptr, bool map_tables = false);
 
 // DDS's SolveBoardPBN: remain_cards in PBN, the cards already played to the current trick in
 // trick_suit/trick_rank (DDS reads as many entries as the card count implies). Returns a DDS

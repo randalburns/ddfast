@@ -53,7 +53,13 @@ struct Position {
 // else from build/tables under the current directory. Missing tables are built there first
 // (the three-card table and the four-card pattern table: about 380 MB and 760 MB
 // of files; a few minutes on many threads, once). The tables use about 1.2 GB of memory.
-void init(const char* table_dir = nullptr);
+//
+// map_tables: by default every process reads the two files into its own memory (on huge pages
+// where the system has them, which is the fastest to search). With map_tables, or with the
+// environment variable DDFAST_TABLE_MAP set to anything but 0, the files are mapped read-only
+// instead: all processes on the machine that use the same files then share one copy of the
+// 1.1 GB, and a process starts without copying it. For many solver processes on one machine.
+void init(const char* table_dir = nullptr, bool map_tables = false);
 
 // problems[0..n) -> tricks[i], declarer's tricks. On the calling thread, one at a time.
 void solve(const Problem* problems, size_t n, uint8_t* tricks);
