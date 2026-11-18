@@ -15,7 +15,7 @@ It keeps DDS's approach to the double-dummy search: an alpha-beta search asked a
 "at least t tricks?" questions, a transposition table of positions reduced to the cards that
 matter, DDS's quick-tricks and later-tricks bounds, and DDS's move-ordering heuristics (ported
 from DDS line by line and checked against it, `src/dds_port.hpp`). What changes is how they
-run: positions are 64-bit hand words handled with bit operations and AVX-512 (NEON on Apple silicon), the bounds and
+run: positions are 64-bit hand words handled with bit operations and AVX-512 (Google Highway on Apple silicon), the bounds and
 the move ordering work on those words without DDS's per-node bookkeeping, the transposition
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
 guess, and the last 2, 3 and 4 cards of each hand are looked up in the precomputed tables of
@@ -92,17 +92,19 @@ compiler; `LIBONLY=1` skips DDS, the tests and the benchmarks. See the comments 
 
 ### On macOS
 
-Install Apple's compiler once, then build as above:
+Install Apple's compiler and Google Highway (headers only) once, then build as above:
 
 ```sh
 xcode-select --install
+brew install highway
 git clone --recursive https://github.com/randalburns/ddfast.git
 cd ddfast
 scripts/build.sh
 ```
 
 `scripts/build.sh` sees `arm64` from
-`uname -m` and compiles with `-mcpu=native` in place of `-march=native`. Apple clang may know
+`uname -m` and compiles with `-mcpu=native` in place of `-march=native`, and with Highway's
+headers from Homebrew (set `HWY_INC` to the directory holding `hwy/` to use others). Apple clang may know
 a newer CPU only by an older name (it treats an M5 as an M3), which leaves out the scalar
 popcount and count-trailing-zeros instructions (CSSC); the script adds them, as
 `-mcpu=native+cssc`, when `sysctl hw.optional.arm.FEAT_CSSC` says the CPU has them. That is
@@ -138,21 +140,28 @@ built on different machines can differ in size; the answers are exact either way
 ## The macOS port
 
 ddfast and ddclaim were written for AVX-512 and BMI2. The port keeps that code as it was for
-x86-64 and adds an AArch64 version of each piece, chosen at compile time. The pieces live in
+x86-64 and adds an AArch64 version of each piece, chosen at compile time. There are two
+implementations of the vector code: AVX-512 intrinsics on x86-64 and Google Highway (static
+dispatch, 128-bit vectors) on AArch64; there is no hand-written NEON. The pieces live in
 one header, `extern/ddclaim/include/ddclaim/port.hpp`, used by both ddclaim and ddfast:
 
 - **pext and pdep**, which Arm lacks, are done a byte at a time through two 64 KB tables
   (they fit in a performance core's L1 cache). The eight bytes are independent: each byte's
-  output position comes from one NEON popcount and a multiply. A mask used for several calls is
+  output position comes from one vector popcount and a multiply. A mask used for several calls is
   prepared once (`ddport::BitMask`). This is the largest cost of the port: about 50
   instructions for what is one instruction on x86. So the move generators find the heads of
   runs of touching cards with an add-and-carry bit trick instead, without pext, and constant
   masks become shifts.
-- **The AVX-512 blocks** become NEON (two 64-bit or four 32-bit lanes) or plain scalar code:
-  the transposition-table and pattern-table block matches, the choice of the best remaining
-  card, the per-suit bounds and the lead move ordering. In the move ordering, the per-suit
-  weights use four-lane NEON vectors as before, and a branch-free scalar loop over the cards
-  takes the place of AVX-512's compress and 16-lane permutes.
+- **The AVX-512 blocks** become Highway code on 128-bit vectors (two 64-bit or four 32-bit
+  lanes) or plain scalar code: the transposition-table and pattern-table block matches, the
+  choice of the best remaining card, the per-suit bounds and the lead move ordering. In the
+  move ordering, the per-suit weights use four-lane vectors as before, and a branch-free scalar
+  loop over the cards takes the place of AVX-512's compress and 16-lane permutes. The lane
+  masks of the block matches are narrowed as vectors by truncation (`OrderedTruncate2To`, one
+  `uzp1` each); Highway's `OrderedDemote2MasksTo` narrows with saturation, two dependent
+  instructions each, and cost about 1% of the time per deal. Written this way the Highway code
+  makes the same search (the same node counts) as the NEON intrinsics it replaced, in the same
+  number of cycles.
 - **Thread-local state**: on macOS each thread-local variable costs a function call to find
   its address, once in every function that uses it. The search's hot per-thread variables
   (the hands, the lengths, the search state) are kept in one thread-local struct, so every node
