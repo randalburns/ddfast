@@ -27,16 +27,16 @@ history.
 Illustrated explainers of the techniques behind the speed, for programmers who know C++ and
 bridge basics:
 
-- **[ddfast design](https://randalburns.github.io/ddfast/)**: the index of the pages.
-  - **[One word per hand](https://randalburns.github.io/ddfast/hand-words.html)**: each hand
-    as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick
-    winners, one card per run of touching cards, the cards that decided a result) as a few
-    bit operations.
-  - **[Follow-hand rules](https://randalburns.github.io/ddfast/follow-hand.html)**: how the
-    second, third and fourth hands pick their first card with a few cheap rules instead of
-    DDS's per-card weights, with worked examples.
-  - **[Endgame tables](https://randalburns.github.io/ddfast/endgame-tables.html)**: every 2-
-    and 3-card ending as one lookup, and 4-card endings matched against learned card
+- **[ddfast design](https://randalburns.github.io/ddfast/)**: the search in brief, where the
+  speed comes from (what each part is worth, largest first) and the speed against DDS.
+  - **[Follow-hand rules](https://randalburns.github.io/ddfast/follow-hand.html)** (1.66x):
+    the second, third and fourth hands pick their first card with a few cheap rules instead
+    of DDS's per-card weights, with worked examples.
+  - **[One word per hand (with pext/pdep)](https://randalburns.github.io/ddfast/hand-words.html)**
+    (1.52x): each hand as a single 64-bit word and the card logic as a few bit operations,
+    which pays because of the `pext` and `pdep` instructions.
+  - **[Endgame tables](https://randalburns.github.io/ddfast/endgame-tables.html)** (1.30x):
+    every 2- and 3-card ending as one lookup, and 4-card endings matched against learned card
     patterns, with examples from the real tables.
 
 The pages are published from the `gh-pages` branch.
