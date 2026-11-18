@@ -1115,7 +1115,91 @@ every node count above also compared all answers with DDS; SELFTEST (-DSELFTEST=
 Next: the third-hand gaps are real but no simple feature separated them; FSNAP at 12-13 cards
 (slow) or a two-level oracle (which accounts for table reuse) may be needed.
 
-## Round 15 (perf-arena-nodes): node-reduction sweep, nothing kept
+## Round 15 (branch perf-arena): micro-optimization agents, table directory, profiler
+
+Two rounds of parallel agents, each in its own worktree, building on CPUs 4-11 and measuring
+on its own fast core (1, 2 or 3). Net result: about -3.5% cycles per deal on one core
+(estimate: -1.3% from 15a, which may be partly layout, plus -2.2 to -2.6% from 15b, measured
+against a control), node count unchanged at 82,915,440 on the public set, all exact. Also:
+`tools/prof/` (a sampling profiler on hardware counters, since perf is not installed) and fixes
+that make the VERIFY_ORDER and SELFTEST builds work again (branch verify).
+
+### 15a: registers, branches, dead code (merged)
+
+| Branch | Kept | Agent's figure | Notes |
+|---|---|---|---|
+| perf-arena-registers | tt_lookup always inlined into lead (it was a call with stack out-parameters); S->trk stores only when DFOL <= 13 (only the port's follow ordering reads them; follow 1 has the lead card as `best`) | -2.0% cycles, -3.8% instructions | Dropped: lead returning {R, result} by value (+3.1% instructions), force-inlined tt_store (-1.9% instructions, cycles in noise), play/unplay from saved values |
+| perf-arena-branchless | the table's lead hint set by a mask select (`hb < 52` compiled to a mispredicting branch) | about -1%, branch misses -4.7% | Dropped: reading slot and first block before branching (TTFAST, +3%), loop-free add_runs (+2%), lone follow card played directly (more misses), fused occupied/key tests |
+| perf-arena-prune | 821 lines of dead experiment switches removed from solver.cpp (ETC*, ROOT*, ORACLE, MEM*, SNAP, DFOL1-3, DQ2 and others); study switches used by bench/loo.sh, bench/dds_study.sh and docs/LOO.md kept | -4% (ranges overlap) | Dropped: [[unlikely]] / cold wrappers on rare paths (lead<false> grew 18.4 -> 22.4 KB, cycles neutral) |
+
+Merged (clean A/B, 9 alternating pairs, CPU 0, nothing else running), base 6fc8392:
+cycles/deal 16.82M -> 16.60M median (-1.3%, ranges overlap), instructions 38.42M -> 37.49M
+(-2.4%), branch misses 170.5k -> 164.2k (-3.7%). Other modes (single runs unless noted):
+solve_parallel on 8 threads 1,076 -> 1,108 deals/s (+3.0%, two runs each), full tables on 8
+threads 136.0 -> 140.6 tables/s, one-deal latency 16.69M -> 16.26M cycles. DDS on the same
+core: 72.4M cycles per deal, so 4.30x -> 4.36x. The agents' separate figures (about -7% in
+sum) did not add up: they were measured while three agents loaded memory at once.
+
+Profile (bprof, public set): about 1.2 branch misses per node; lead<false> holds 64% of
+branch-miss samples (follow 1-3 inlined into it; one 18 KB function with about 740 stack
+references, which Zen 5 handles cheaply, so spills barely matter); about 22% of misses in
+tt_lookup.
+
+### 15b: table directory (merged), nodes and joint agents (not merged)
+
+**Kept (perf-arena-memory, cc1c817): the directory starts at 2^15 slots (DIR_MIN 11 -> 15).**
+Most deals grew the directory twice (2^11 -> 2^13 -> 2^15), and each growth rehashes with
+unpredictable branches. Control-build A/B (CPU 0, 7 rounds, three builds in turn; control =
+same source with -DDIR_MIN=11):
+
+| Set | Base | Control | DIR_MIN 15 | vs control |
+|---|---|---|---|---|
+| public | 15.80M (15.75-16.06) | 15.79M (15.71-15.95) | 15.38M (15.35-15.53) | -2.6% |
+| chunk1, 600 deals | 16.56M (16.55-16.63) | 16.52M (16.50-16.69) | 16.16M (16.15-16.18) | -2.2% |
+
+Branch misses 160.7k / 159.9k / 148.1k. Nodes identical in all three (82,915,440 public,
+87,730,725 chunk1). The branchless compaction in grow (also in cc1c817) is worth nothing on
+its own (control vs base). Also measured by the agent: DIR_MIN 13 and 16-17 worse than 15;
+growing at 1/4 full no change; huge pages are already in use for the pool, directory and ddclaim
+tables; alignas(64) on Hot/SState within noise.
+
+**The next-block pointer inside the block is worse (+5.7% cycles, +1M instructions).** The
+separate `next` array is small and stays in L1, so it loads in parallel with the block; inside
+the block each hop waits on the block's line. The "two dependent cache misses per chain step"
+assumption from 15a does not hold at this table size. Two-line blocks on a 128-byte boundary
+were also worse (+1%).
+
+Where the remaining cost is (bprof cycle, L1-miss and cache-miss modes): about 30% of sampled
+cache misses are in ddclaim's 4-card pattern probe (probe_pattern, pmatch8; about 1,750 probes
+per deal, 5-7% of cycle samples); only about 3% are in the transposition table, whose block
+reads mostly hit L2 (about 12.7k entries per deal). About 9.5% of cycle samples land on the
+first loads of H on entry to lead, which looks like restart cost after mispredicted branches in
+the caller rather than memory. Chain walks (STATS): hits scan about 2 blocks at 6 cards and 3 at
+7; misses about 3.2.
+
+**Joint agent (perf-arena-joint, 60939d4, not merged):** the directory grows at 1/8 full
+(DIRLOAD=3, DIR_MIN 12, DIR_MAX 22): -1.7% public / -1.3% chunk2 cycles, branch misses -7.5%,
+nodes unchanged. Same mechanism as DIR_MIN 15 (a sparser directory, fewer mispredicted probe
+loops), so the two overlap; DIR_MIN 15 was adopted. Its trade-off survey (one-pass bprof
+screens unless noted), all dropped:
+
+| Experiment | Nodes | Cycles |
+|---|---|---|
+| 4-card pattern table probed before dds_bounds at 4 cards | | about +1% |
+| No store at 4-5 cards when the subtree had fewer than 2 lead nodes | | +1 to +2% |
+| A hint stored at failed nodes (lead with the largest subtree) | | +1 to +4% |
+| A hit found past the newest block copied into the newest block | -0.2% | +1 to +2% |
+| Only the first 3 / 6 blocks of a chain scanned | +41% / +13.5% | |
+| Stored masks widened by each suit's top card (to test splitting chains by top-card owner) | x2.9 | |
+| TTPICK=0 (first matching entry) | +3.2% | equal |
+| TTPICK=2 for 8+ cards only | -0.02% | equal |
+| H[1], H[2] from a 16-byte load in lead; -fno-slp-vectorize | | no gain |
+
+Conclusion: dropping or cutting off entries costs far more nodes than it saves in memory
+traffic, and getting more out of the table (scanning further, copying hits forward) saves fewer
+nodes than the extra scanning costs.
+
+**Nodes agent (perf-arena-nodes): node-reduction sweep, nothing kept.**
 
 Base perf-arena + verify. STATS nodes: public set 82,915,440; chunk1.set first 600 deals
 87,730,725. Cycles: alternating runs on CPU 2 (`bench_solve set`), 7 pairs. All variants gave
@@ -1142,3 +1226,20 @@ one extra captured variable in tt_store) ran 1.3-1.4% faster than the base build
 (public 16.26M -> 16.04M, chunk1 16.95M -> 16.71M median), with identical node counts. Differences
 of this size between two builds can be layout alone; compare a candidate against a control
 build that carries the same source edits with the feature switched off.
+
+### 15c: lessons and open leads
+
+- Measure against a control build. Equivalent builds differ by 1.3-1.4% in cycles from code
+  layout alone, so a candidate is compared with a build of the same source with the feature
+  switched off (or forced to the old value), alternating, on an idle core. Agents measuring at
+  the same time inflate each other's noise to 2-3%.
+- Branch-miss and instruction counts (bprof ... none) are nearly deterministic: screen with
+  them, decide with cycles. Cutting instructions buys about half as much in cycles here.
+- Micro-tuning (registers, branches, code size) is close to used up; so is the transposition
+  table's layout.
+- Open: the 4-card pattern probe's DRAM misses (a cheaper path for the 16% of probes that miss,
+  or skipping them); a branchless or multi-slot directory probe (the remaining misses in
+  TT::find are "key not in the table yet"); 8-byte directory slots (needs a new key/head
+  split); smaller first blocks for keys with few entries (changes which entry is picked, so the
+  search); proof-size predictors for root and 12-card leads (about 20% of nodes on paper, no new
+  predictor yet).

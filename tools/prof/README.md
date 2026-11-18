@@ -31,5 +31,8 @@ OUT=bin-new  sh scripts/build.sh && sh tools/prof/build.sh bin-new    # on the n
 CPU=0 sh tools/prof/ab.sh bin-base bin-new 9
 ```
 The clock on a laptop moves a lot under load, so cycle medians from alternating runs are the
-figure to trust, and differences of 1-3% need many pairs. Branch-miss counts from
+figure to trust, and differences of 1-3% need many pairs. Code layout alone moves cycles by
+1-1.5% between equivalent builds, so compare the candidate with a *control*: the same source
+with the feature switched off (e.g. built with `XFLAGS=-DFEATURE=0`), not with an older build
+(docs/NOTES.md round 15). Branch-miss counts from
 `bprof ... none` are nearly deterministic, so they screen a change before the timing runs.
