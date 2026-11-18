@@ -219,10 +219,13 @@ namespace port = ddfast::port;
 // a block is a[8], b[8]. From 8 cards: w0 = mask (52 bits), lo in bits 52-55, hi in 56-59;
 // w1, w2 = the owner strings; a block is w0[8], w1[8], w2[8]. An unused slot never matches.
 #ifndef DIR_MIN
-#define DIR_MIN 11
+#define DIR_MIN 15  // was 11: the regrowths (11, 13, 15) cost about 12k branch misses a deal
 #endif
 #ifndef DIR_MAX
 #define DIR_MAX 20
+#endif
+#ifndef DIR_LSH
+#define DIR_LSH 1  // grow when the directory is 2^-DIR_LSH full
 #endif
 #ifndef POOL_BITS
 #define POOL_BITS 22
@@ -269,8 +272,8 @@ struct TT {
   }
   __attribute__((noinline)) void grow() {
     size_t k = 0;
-    for (size_t i = 0; i < (size_t(1) << bits); i++)
-      if (dir[i].gen == gen) tmp[k++] = dir[i];
+    // Without a branch: whether a slot is in use is unpredictable.
+    for (size_t i = 0; i < (size_t(1) << bits); i++) tmp[k] = dir[i], k += dir[i].gen == gen;
     new_gen();
     bits += 2;
     for (size_t i = 0; i < k; i++) {
@@ -290,7 +293,7 @@ struct TT {
         if ((d.key & ((1ull << 54) - 1)) == key54) return &d;
         h = (h + 1) & ((size_t(1) << bits) - 1);
       }
-      if (keys >= (1u << (bits - 1))) {
+      if (keys >= (1u << (bits - DIR_LSH))) {
         if (bits + 2 <= DIR_MAX) grow();
         else reset();
         continue;
