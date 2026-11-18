@@ -22,6 +22,7 @@
 #                 the value changes).
 #                 Use a separate OUT for such builds.
 #   OUT=dir       output directory (default bin)
+#   ARCH="..."    target flags in place of -march=native / -mcpu=native
 #   LIBONLY=1     build only the library and the tool (no DDS, tests or benchmarks)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,7 +37,7 @@ if [ -z "${CXX:-}" ]; then
   if command -v clang++ >/dev/null 2>&1; then
     CXX="clang++"
     # Some machines' clang picks a GCC without C++ headers unless told otherwise.
-    for d in /usr/lib/gcc/x86_64-linux-gnu/14 /usr/lib/gcc/x86_64-linux-gnu/13; do
+    for d in /usr/lib/gcc/$(uname -m)-linux-gnu/14 /usr/lib/gcc/$(uname -m)-linux-gnu/13; do
       if [ -d "$d" ] && [ -d "/usr/include/c++/$(basename "$d")" ]; then
         CXX="clang++ --gcc-install-dir=$d"
         break
@@ -48,12 +49,19 @@ if [ -z "${CXX:-}" ]; then
 fi
 XFLAGS=${XFLAGS:-}
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-case "$(uname -m)" in
+# ARCH: the target flags; by default the build machine's own CPU. CI sets it (for example
+# -march=icelake-server) to build the AVX-512 path on a runner without AVX-512 and run it under
+# Intel SDE.
+if [ -z "${ARCH:-}" ]; then case "$(uname -m)" in
   arm64|aarch64)
     ARCH="-mcpu=native"
     # Apple clang may know the CPU only as an older one (an M5 as apple-m3); add the scalar
     # popcount and count-trailing-zeros instructions (CSSC) when the CPU has them.
-    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc"
+    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc" ;;
+  *) ARCH="-march=native" ;;
+esac; fi
+case "$(uname -m)" in
+  arm64|aarch64)
     # Google Highway (headers only): $HWY_INC, else Homebrew's prefix, else the system's.
     if [ -z "${HWY_INC:-}" ]; then
       for d in "$(brew --prefix 2>/dev/null)/include" /opt/homebrew/include /usr/local/include /usr/include; do
@@ -65,7 +73,6 @@ case "$(uname -m)" in
       exit 1
     fi
     ARCH="$ARCH -I$HWY_INC" ;;
-  *) ARCH="-march=native" ;;
 esac
 BASE="-std=c++20 -O3 -DNDEBUG $ARCH"
 INC="-Iinclude -Iextern/ddclaim/include"
