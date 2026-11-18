@@ -41,7 +41,7 @@ inline ddcore::Position to_position(const Problem& p) {
 // A counter of the calling thread's user-mode events, or -1 (always -1 off Linux: the
 // WorkerStats counters then stay 0).
 #if !defined(__linux__)
-enum { PERF_TYPE_HARDWARE, PERF_TYPE_HW_CACHE, PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_BRANCH_MISSES,
+enum { PERF_TYPE_HARDWARE, PERF_TYPE_HW_CACHE, PERF_TYPE_RAW, PERF_COUNT_HW_CPU_CYCLES, PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_BRANCH_MISSES,
        PERF_COUNT_HW_CACHE_MISSES, PERF_COUNT_HW_CACHE_DTLB = 0, PERF_COUNT_HW_CACHE_OP_READ = 0, PERF_COUNT_HW_CACHE_RESULT_MISS = 0 };
 int perf_open(uint64_t, uint32_t = 0) { return -1; }
 #else
@@ -81,7 +81,7 @@ struct Pool {
   void worker(int w) {
     if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
     const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
-    const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = perf_open(PERF_COUNT_HW_CACHE_MISSES);
+    const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = getenv("DDF_RAW_CM") ? perf_open(strtoull(getenv("DDF_RAW_CM"), nullptr, 0), PERF_TYPE_RAW) : perf_open(PERF_COUNT_HW_CACHE_MISSES);  // DDF_RAW_CM: a raw event in place of cache misses (measurements)
     const int ft = perf_open(PERF_COUNT_HW_CACHE_DTLB | (PERF_COUNT_HW_CACHE_OP_READ << 8) | (PERF_COUNT_HW_CACHE_RESULT_MISS << 16), PERF_TYPE_HW_CACHE);
     uint64_t seen = 0;
     for (;;) {
@@ -101,6 +101,39 @@ struct Pool {
       const auto t0 = std::chrono::steady_clock::now();
       const double c0 = perf_read(fc), i0 = perf_read(fi), b0 = perf_read(fb), m0 = perf_read(fm), t0c = perf_read(ft);
       size_t done = 0;
+      // Experiment: DDFAST_NCTX > 1 interleaves that many searches on this thread, taking
+      // DDFAST_NCTX_CHUNK (default 4 * nctx) problems at a time.
+      static const int nctx = getenv("DDFAST_NCTX") ? atoi(getenv("DDFAST_NCTX")) : 1;
+      static const int chunk = getenv("DDFAST_NCTX_CHUNK") ? atoi(getenv("DDFAST_NCTX_CHUNK")) : 4 * nctx;
+      if (nctx > 1 && deals) {
+        std::vector<const uint16_t*> hs(static_cast<size_t>(chunk));
+        std::vector<uint8_t*> os(static_cast<size_t>(chunk));
+        for (;;) {
+          const size_t k0 = next.fetch_add(size_t(chunk), std::memory_order_relaxed);
+          if (k0 >= n) break;
+          const size_t cnt = std::min(size_t(chunk), n - k0);
+          for (size_t j = 0; j < cnt; j++) {
+            const size_t i = order ? order[k0 + j] : k0 + j;
+            hs[j] = &deals[i].hand[0][0], os[j] = &tables[i].tricks[0][0];
+          }
+          detail::solve_tables_interleaved(hs.data(), os.data(), cnt, nctx);
+          done += cnt;
+        }
+      }
+      if (nctx > 1 && !deals) {
+        std::vector<ddcore::Position> ps(static_cast<size_t>(chunk));
+        std::vector<uint8_t> out(static_cast<size_t>(chunk));
+        std::vector<size_t> idx(static_cast<size_t>(chunk));
+        for (;;) {
+          const size_t k0 = next.fetch_add(size_t(chunk), std::memory_order_relaxed);
+          if (k0 >= n) break;
+          const size_t cnt = std::min(size_t(chunk), n - k0);
+          for (size_t j = 0; j < cnt; j++) idx[j] = order ? order[k0 + j] : k0 + j, ps[j] = to_position(problems[idx[j]]);
+          detail::solve_positions(ps.data(), cnt, out.data(), nctx);
+          for (size_t j = 0; j < cnt; j++) tricks[idx[j]] = uint8_t((problems[idx[j]].declarer & 1) ? 13 - out[j] : out[j]);
+          done += cnt;
+        }
+      }
       for (;;) {
         const size_t k = next.fetch_add(1, std::memory_order_relaxed);
         if (k >= n) break;
