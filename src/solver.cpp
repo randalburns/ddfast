@@ -1843,7 +1843,12 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
     STAT(g_tnoslot[n] += !d0 && !wide);
     if (const DirSlot* d = d0) {
       const unsigned hb = unsigned(d->key >> 54) & 63;
-      if (hb < 52) hint = ddport::pdep64(1ull << hb, all);
+      {
+        // Without a branch (it mispredicted): hb >= 52 means no stored lead.
+        u64 keep = 0 - u64(hb >= 52);
+        asm("" : "+r"(keep));  // or clang turns the select back into a branch
+        hint = (ddport::pdep64(1ull << hb, all) & ~keep) | (hint & keep);
+      }
 #ifdef STATS
       unsigned sb_any = 0; int sb_n = 0;
       struct SBEnd { unsigned& a; int n; bool w; bool done = false; ~SBEnd() { if (!done && !w) { g_tmiss[n]++; g_evict[n] += !a; } } } sb_end{sb_any, n, wide};
