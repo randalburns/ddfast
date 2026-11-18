@@ -23,8 +23,9 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
 <main>
 <h1>ddfast design</h1>
 <p class="lede">Illustrated explainers of the techniques behind <a href="https://github.com/randalburns/ddfast">ddfast</a>, a performance optimization of the <a href="https://github.com/dds-bridge/dds">DDS</a> double-dummy search, for programmers who know C++ and bridge basics.</p>
-<a class="card" href="hand-words.html"><h2>One word per hand</h2><p>Each hand as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners, one card per run of touching cards, the cards that decided a result) as a few bit operations.</p></a>
-<a class="card" href="table-search.html"><h2>The pattern table search</h2><p>The per-deal transposition table of card patterns, its directory and blocks, and how AVX-512 matches a block of 8 stored patterns against a position in a few instructions.</p></a>
+<a class="card" href="hand-words.html"><h2>One word per hand</h2><p>Each hand as a single 64-bit word, 16 bits per suit, and the card logic (following suit, trick winners, one card per run of touching cards, the cards that decided a result) as a few bit operations. Worth 1.3-1.4&#215; over DDS on its own.</p></a>
+<a class="card" href="follow-hand.html"><h2>Follow-hand rules</h2><p>How the second, third and fourth hands pick their first card with a few cheap rules instead of DDS's per-card weights, with worked examples. The largest single addition: 1.66&#215;.</p></a>
+<a class="card" href="endgame-tables.html"><h2>Endgame tables</h2><p>Every 2- and 3-card ending as one lookup, and 4-card endings matched against learned card patterns, with examples from the real tables. Worth 1.30&#215; as a pair.</p></a>
 <footer>Source and documentation: <a href="https://github.com/randalburns/ddfast">github.com/randalburns/ddfast</a></footer>
 </main>
 </body>

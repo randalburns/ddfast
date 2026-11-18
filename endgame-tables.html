@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endgame Tables</title>
+<meta name="description" content="How ddfast answers the last 2, 3 and 4 cards of each hand from precomputed tables, with examples from the real tables.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with figures and code allowed to run wider; tables scroll inside their own box. */
+:root {
+  --bg: #f5f7f4;
+  --surface: #ffffff;
+  --fg: #18201c;
+  --muted: #59665f;
+  --rule: #d5ddd7;
+  --accent: #1d6b55;      /* card-present bits, links */
+  --accent-soft: #d4ebe2;
+  --on-accent: #ffffff;
+  --red: #b5302a;          /* hearts and diamonds */
+  --guard: #9a6a12;
+  --code-bg: #eef2ee;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111613; --surface: #18201b; --fg: #e3ebe5; --muted: #9aa9a0; --rule: #2c3830;
+    --accent: #5cc4a2; --accent-soft: #1f3a30; --on-accent: #0c1410; --red: #f07a70; --guard: #e0b052; --code-bg: #1a231e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111613; --surface: #18201b; --fg: #e3ebe5; --muted: #9aa9a0; --rule: #2c3830;
+  --accent: #5cc4a2; --accent-soft: #1f3a30; --on-accent: #0c1410; --red: #f07a70; --guard: #e0b052; --code-bg: #1a231e;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.65 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 8px; }
+main > * { min-width: 0; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.2; }
+h1 { font-size: clamp(2rem, 5vw, 2.8rem); margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.5rem; margin: 40px 0 4px; padding-top: 16px; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.1rem; margin: 24px 0 0; }
+p, li { max-width: 68ch; }
+p { margin: 8px 0; }
+.lede { font-size: 1.12rem; color: var(--muted); }
+.eyebrow { font: 600 0.75rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+pre { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+pre code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.55; }
+.src { font: 0.75rem var(--font-mono); color: var(--muted); margin: -4px 0 12px; }
+.red { color: var(--red); fill: var(--red); }
+figure { margin: 16px 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; }
+.figscroll { overflow-x: auto; }
+figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; max-width: 68ch; }
+svg.diag { display: block; width: 100%; min-width: 520px; height: auto; color: var(--fg); }
+svg .lbl { font: 12px var(--font-body); fill: var(--fg); }
+svg .lblb { font: 600 12px var(--font-body); fill: var(--fg); }
+svg .lblb.red, svg .lbl.red { fill: var(--red); }
+svg .tiny { font: 10px var(--font-mono); fill: var(--muted); }
+svg .mono { font: 600 13px var(--font-mono); fill: var(--fg); }
+svg .op { font: 600 12px var(--font-mono); fill: var(--accent); }
+svg .cl { font: 600 12px var(--font-mono); }
+svg rect.off { fill: var(--surface); stroke: var(--rule); }
+svg rect.un { fill: var(--code-bg); stroke: var(--rule); stroke-dasharray: 2 2; }
+svg rect.on { fill: var(--accent); stroke: var(--accent); }
+svg rect.pr { fill: var(--accent-soft); stroke: var(--accent); }
+svg rect.gd { fill: var(--surface); stroke: var(--guard); stroke-width: 1.5; }
+svg rect.nib { fill: var(--accent-soft); stroke: var(--accent); }
+svg rect.nib.dim { fill: var(--surface); stroke: var(--rule); stroke-dasharray: 3 2; }
+svg .ont { fill: var(--on-accent); }
+svg .offt, svg .unt, svg .prt, svg .nibt { fill: var(--fg); }
+svg .gdt { fill: var(--guard); }
+svg .wire { fill: none; stroke: var(--rule); stroke-width: 1.2; }
+svg .wire.hot { stroke: var(--accent); stroke-width: 1.8; }
+.tablewrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; font-size: 0.9rem; min-width: 100%; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.72rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; font-family: var(--font-mono); font-size: 0.85rem; }
+.note { border-left: 3px solid var(--guard); padding: 4px 0 4px 12px; color: var(--muted); font-size: 0.92rem; }
+ul { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+
+.deal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: ". n ." "w t e" ". s ."; gap: 6px; margin: 10px 0 6px; max-width: 520px; }
+.seat { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; font: 0.86rem/1.4 var(--font-mono); min-width: 0; overflow-wrap: anywhere; }
+.seat .who { display: block; font: 600 0.68rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.seat.n { grid-area: n; } .seat.e { grid-area: e; } .seat.s { grid-area: s; } .seat.w { grid-area: w; }
+.seat.turn { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.seat.turn .who { color: var(--accent); }
+.trick { grid-area: t; display: flex; flex-direction: column; justify-content: center; align-items: center; font: 0.8rem/1.4 var(--font-mono); color: var(--muted); text-align: center; }
+.trick b { color: var(--fg); }
+.pickc { display: inline-block; background: var(--accent); color: var(--on-accent); border-radius: 4px; padding: 0 5px; font-weight: 600; }
+.ex { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; margin: 12px 0; }
+.ex h4 { font: 600 1rem/1.3 var(--font-display); margin: 0; }
+.ex .tag { font: 600 0.68rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
+.ex p { margin: 6px 0 0; font-size: 0.94rem; }
+.ex .order { font: 0.8rem var(--font-mono); color: var(--muted); }
+.cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 12px 0; }
+.cmp > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; }
+.cmp h4 { font: 600 0.95rem var(--font-display); margin: 0 0 6px; }
+.cmp ol { margin: 0; padding-left: 20px; font-size: 0.92rem; }
+.big { font: 700 2.2rem/1 var(--font-display); color: var(--accent); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.facts > div { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; font-size: 0.85rem; color: var(--muted); }
+.facts b { display: block; font: 700 1.5rem/1.2 var(--font-display); color: var(--fg); }
+
+.flow { display: grid; gap: 6px; margin: 12px 0; }
+.step { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 10px; align-items: start; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; }
+.step .n { font: 600 0.78rem var(--font-mono); color: var(--accent); }
+.step.tab { border-color: var(--accent); background: var(--accent-soft); }
+.step p { margin: 0; font-size: 0.92rem; }
+.res td:first-child { font-family: var(--font-mono); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="eyebrow">ddfast &#183; endgame tables</div>
+  <h1>Endgame Tables</h1>
+  <p class="lede">How ddfast answers the last tricks of a deal from precomputed tables: every 2-card and 3-card ending is a single lookup, and 4-card endings are matched against a large table of learned card patterns.</p>
+</header>
+
+<div class="facts">
+  <div><b>1.30&#215;</b>slower with both tables turned off; nodes +56%. LOO</div>
+  <div><b>3-4%</b>what either table saves on its own: each covers for the other. LOO</div>
+  <div><b>1.1 GB</b>of table files, built once on first use. README</div>
+</div>
+
+<p>Excerpts are from <code>tables.hpp</code> (the table layouts and the probes, which inline into the search) and <code>src/solver.cpp</code>. The examples were checked by running the real probes on the real tables. Figures come from <code>docs/LOO.md</code> (one Zen 5 core) and <code>README.md</code>.</p>
+
+<h2>Where the tables sit in the search</h2>
+<p>ddfast asks yes/no questions: "with this leader, does North-South take at least <i>t</i> of the remaining <i>n</i> tricks?" At every lead node, before generating any moves, it tries to settle the question cheaply, in this order:</p>
+<div class="flow">
+  <div class="step"><span class="n">1 card</span><p>Play the trick out directly: four cards, one winner.</p></div>
+  <div class="step tab"><span class="n">2 cards</span><p>One lookup in the 2-card table. Always exact.</p></div>
+  <div class="step tab"><span class="n">3 cards</span><p>One lookup in the 3-card table. Always exact.</p></div>
+  <div class="step"><span class="n">4+ cards</span><p>The per-deal transposition table, then DDS's quick-tricks and later-tricks bounds.</p></div>
+  <div class="step tab"><span class="n">4 cards</span><p>The 4-card pattern table. A hit is copied into the per-deal table, where it is cheaper to find again.</p></div>
+  <div class="step"><span class="n">otherwise</span><p>Search: generate the leads and recurse.</p></div>
+</div>
+<pre><code>if (n == 2 &amp;&amp; g_use2) return probe2&lt;NT&gt;(H, L, all, target, R);
+if (n == 3 &amp;&amp; g_use3) return probe3&lt;NT&gt;(H, L, all, target, R, [] { yield(); });
+...
+if (n &gt;= 4 &amp;&amp; n &lt; 4 + P_LEVELS &amp;&amp; g_pt[n - 4].use) {
+  const int r = probe_pattern&lt;NT&gt;(H, LENS, n, L, all, target, pq, R, hit, [] { yield(); });
+  if (r &gt;= 0) {
+    tt_store(R, r, 0);  // a pattern in the per-deal table is cheaper to find again
+    return r;
+  }
+}</code></pre>
+<p class="src">src/solver.cpp, lead()</p>
+<p>Like every node of the search, a probe returns the answer and <b>R</b>, the cards that decided it. R is widened to every card above them in their suit (<code>fill_up</code>), and the parent folds it into the pattern it stores. So the tables do more than end the search two or three tricks early: they hand back small sets of relevant cards, which make the patterns above them more general.</p>
+
+<h2>What all three tables share</h2>
+<ul>
+<li><b>Leader-relative.</b> A probe sees the four hands from the leader's seat and answers for the leader's side, so one entry serves all four leaders.</li>
+<li><b>Compressed over the cards in play.</b> The cards still in play are packed together with <code>pext</code>, so only which ones are higher matters, not their ranks. Two bit strings over those packed cards give each card's owner: one is set for the leader's left- and right-hand opponents, the other for partner and the right-hand opponent.</li>
+<li><b>Trumps in a fixed lane, side suits sorted.</b> ddfast always keeps trumps in lane 3. The 3-card and 4-card tables also sort the three side suits by length with a byte shuffle (<code>shuf8</code>), so endings that differ only in which side suit is which share one entry.</li>
+<li><b>Cards that mattered are stored.</b> Each answer comes with its set of deciding cards: the smallest exact set in the 2- and 3-card tables, and the set the search proved in a 4-card pattern.</li>
+</ul>
+<pre><code>const u64 h3 = H[(L + 3) &amp; 3];
+const u64 alls = ddport::shuf8(all, ctl);               // side suits sorted by length
+const u64 ews = ddport::shuf8((H[(L + 1) &amp; 3] | h3), ctl);
+const u64 sws = ddport::shuf8((H[(L + 2) &amp; 3] | h3), ctl);
+const ddport::BitMask am(alls);
+const unsigned lo = unsigned(am.ext(ews)), hi = unsigned(am.ext(sws));</code></pre>
+<p class="src">tables.hpp, probe3</p>
+
+<h2>2 cards: every ending, in memory</h2>
+<p>Eight cards, two per hand. The index is the suit-length composition of the eight cards, the strain, and the arrangement: which 4 of the 8 cards the opponents hold (C(8,4) = 70), which 2 of those are the right-hand opponent's (6), and which 2 of the leader's side's are partner's (6). That gives 70 &#215; 6 &#215; 6 = 2,520 arrangements. Each entry holds, for both targets, the answer and the 8-bit set of cards that mattered.</p>
+<pre><code>const unsigned rank = g_r70[lo] * 36 + g_r6[ddport::pext16(hi, lo)] * 6 + g_r6[ddport::pext16(hi, lo ^ 0xFF)];
+const unsigned comp = g_comp[popc(all &amp; LANE(0)) + 9 * popc(all &amp; LANE(1)) + 81 * popc(all &amp; LANE(2))];
+const uint16_t e = g_t2[((comp * 2 + NT) * 2520 + rank) * 2 + (tl - 1)];
+R = fill_up(am.dep(e &amp; 0xFF));</code></pre>
+<p class="src">tables.hpp, probe2. The second pext ranks the right-hand opponent's cards among the opponents' four; the third ranks partner's among the leader's side's four.</p>
+<p>The table is 3.3 MB and is built in memory by every <code>init()</code> in a fraction of a second. Each stored set of mattering cards is the smallest exact one: every set of top cards was checked against all endings with the same suit lengths.</p>
+
+<h2>3 cards: every ending, on disk</h2>
+<p>Twelve cards, three per hand: C(12,6) &#215; C(6,3) &#215; C(6,3) = 924 &#215; 20 &#215; 20 = 369,600 arrangements, for each of 102 suit-length configurations (side suits sorted) and both strains. Five bytes per ending: the leader's side's tricks in 2 bits, then for each target 1 to 3 the 12-bit set of cards that matter. The file <code>t3_v2.bin</code> is 377 MB. A probe is one prefetched 5-byte read.</p>
+<pre><code>const size_t rank = size_t(g_r924[lo]) * 400 + g_r20[ddport::pext16(hi, lo)] * 20 + g_r20[ddport::pext16(hi, lo ^ 0xFFF)];
+const size_t cfg = g_cfg3[p0 + 13 * p1 + 169 * p2];
+const uint8_t* addr = g_t3 + ((cfg * 2 + NT) * T3_ARR + rank) * 5;
+...
+const int tl = cut ? target : 4 - target;
+const u64 m = am.dep((e &gt;&gt; (12 * tl - 10)) &amp; 0xFFF);
+R = fill_up(shuffle_lanes(m, g_unshuf[pid]));
+return (int(e &amp; 3) &gt;= tl) == cut;</code></pre>
+<p class="src">tables.hpp, probe3</p>
+
+<h3>Example: a finesse</h3>
+<p>South leads at no trumps with ♠AQ in dummy, ♠32 in hand and the ♦A as an entry. Only where the ♠K sits differs between the two endings.</p>
+<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>2</div><div class="seat w"><span class="who">West</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q</div><div class="seat e"><span class="who">East</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>3</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A</div><div class="trick">3 cards<br>no trumps</div></div>
+<div class="tablewrap"><table class="res">
+<thead><tr><th>Question (king with West)</th><th>Answer</th><th>Cards in play that decided it</th></tr></thead>
+<tbody>
+<tr><td>NS &#8805; 1?</td><td>yes</td><td><span class="red">&#9830;</span>A</td></tr>
+<tr><td>NS &#8805; 2?</td><td>yes</td><td><span class="red">&#9830;</span>A &#9824;A</td></tr>
+<tr><td>NS &#8805; 3?</td><td>yes</td><td><span class="red">&#9830;</span>A &#9824;A &#9824;K &#9824;Q</td></tr>
+</tbody></table></div>
+<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>2</div><div class="seat w"><span class="who">West</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>3</div><div class="seat e"><span class="who">East</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A</div><div class="trick">3 cards<br>no trumps</div></div>
+<div class="tablewrap"><table class="res">
+<thead><tr><th>Question (king with East)</th><th>Answer</th><th>Cards in play that decided it</th></tr></thead>
+<tbody>
+<tr><td>NS &#8805; 1?</td><td>yes</td><td><span class="red">&#9830;</span>A</td></tr>
+<tr><td>NS &#8805; 2?</td><td>yes</td><td><span class="red">&#9830;</span>A &#9824;A</td></tr>
+<tr><td>NS &#8805; 3?</td><td>no</td><td>&#9824;A &#9824;K</td></tr>
+</tbody></table></div>
+<p>The deciding sets are what make a lookup useful to the search above it. "At least one trick" depends only on who holds the ♦A, so the result the parent stores holds for any placement of the other cards. Three tricks with the king onside depend on the ♠A, K and Q, and on the ♦A for the entry; the low cards do not matter.</p>
+
+<h2>4 cards: a table of learned patterns</h2>
+<p>A complete 4-card table would be far too large, so the 4-card table is not complete. It holds <b>patterns</b>: each one is a true statement about a whole class of endings with the same suit lengths in all four hands, naming only the owners of the cards that mattered and a bound on the leader's side's tricks. The patterns are learned when the table is built: random 6-card endings are solved for a fixed time, and every pattern proved for a 4-card ending along the way is kept. The table is then read-only.</p>
+<ul>
+<li><b>Key:</b> the suit lengths of all four hands, leader-relative, side suits sorted, and the strain. A directory maps the key to a run of groups of 8 entries, most-hit first.</li>
+<li><b>Entry:</b> <code>a</code>, the owners of the cards that mattered (the two owner bit strings, compressed); <code>b</code>, those cards, with 3-bit lower and upper bounds in bits 56-58 and 59-61.</li>
+<li><b>Match:</b> an entry decides the question when <code>(b &amp; own) == a</code> and its bounds settle the target. Eight entries are tested at once (<code>ddport::pmatch8</code>: AVX-512 on x86, Google Highway on Apple silicon), and groups are prefetched 8 at a time.</li>
+<li><b>Size:</b> <code>p4_v5.ent</code> and <code>.idx</code>, 758 MB, read into memory at load time.</li>
+</ul>
+<pre><code>for (int j = 0; j &lt; groups; j++) {
+  ...
+  const unsigned kd = ddport::pmatch8(ea + 8 * j, eb + 8 * j, q.own, tl);
+  if (kd) {
+    const int i = __builtin_ctz(kd);
+    const u64 bb = eb[8 * j + i];
+    const int blo = int(bb &gt;&gt; 56) &amp; 7;
+    const u64 mk = am.dep(bb &amp; ((1ull &lt;&lt; (4 * n)) - 1));
+    R = fill_up(shuffle_lanes(mk, g_unshuf[q.pid]));
+    return (blo &gt;= tl) == cut;
+  }
+}
+return -1;  // no entry decides: the search goes on</code></pre>
+<p class="src">tables.hpp, probe_pattern</p>
+
+<h3>Example: the finesse with a fourth card</h3>
+<p>Add a diamond to each hand of the onside ending above.</p>
+<div class="deal"><div class="seat n"><span class="who">North</span>&#9824;A Q &nbsp;<span class="red">&#9830;</span>K 2</div><div class="seat w"><span class="who">West</span>&#9824;K 5 &nbsp;<span class="red">&#9829;</span>Q &nbsp;<span class="red">&#9830;</span>J</div><div class="seat e"><span class="who">East</span><span class="red">&#9829;</span>K J &nbsp;<span class="red">&#9830;</span>Q 3</div><div class="seat s turn"><span class="who">South &#183; leads</span>&#9824;3 2 &nbsp;<span class="red">&#9830;</span>A 4</div><div class="trick">4 cards<br>no trumps</div></div>
+<div class="tablewrap"><table class="res">
+<thead><tr><th>Question</th><th>Pattern table</th><th>Cards in play that decided it</th></tr></thead>
+<tbody>
+<tr><td>NS &#8805; 1?</td><td>yes</td><td>&#9824;A</td></tr>
+<tr><td>NS &#8805; 2?</td><td>yes</td><td>&#9824;A &#9824;K &#9824;Q</td></tr>
+<tr><td>NS &#8805; 3?</td><td>yes</td><td><span class="red">&#9830;</span>A <span class="red">&#9830;</span>K &#9824;A</td></tr>
+<tr><td>NS &#8805; 4?</td><td>no entry decides</td><td>&#8212;</td></tr>
+</tbody></table></div>
+<p>Three of the four questions are answered by patterns. The fourth (South's side can in fact take all four tricks) has no pattern, so the search plays that ending out. Below it, every 3-card ending is a single lookup. With the king offside, the table answers all four questions, including "no" to four tricks.</p>
+
+<h2>What the tables are worth</h2>
+<p>With the tables turned off, the endings are searched instead. On the 600-deal public set, one Zen 5 core:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Turned off</th><th>Nodes</th><th>Slowdown</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Both: 3-card and 4-card tables</td><td class="num">+56%</td><td class="num">1.30&#215;</td><td>LOO</td></tr>
+<tr><td>3-card table alone</td><td class="num">+7.3%</td><td class="num">1.04&#215;</td><td>LOO</td></tr>
+<tr><td>4-card pattern table alone</td><td class="num">+7.5%</td><td class="num">1.03&#215;</td><td>LOO</td></tr>
+<tr><td>4-card hits not copied into the per-deal table</td><td class="num">&#8722;0.5%</td><td class="num">1.04&#215;</td><td>LOO</td></tr>
+</tbody></table></div>
+<p><b>The tables stand in for each other.</b> Without the 3-card table, the 4-card patterns, the per-deal table and the bounds still catch most of the endings it would have answered, and the other way round. Only with both gone does the search grow by half. The tables matter even more for small positions: the README measures ddfast at 13&#215; DDS's speed on 7-card positions and 58&#215; at 5 cards.</p>
+
+<h2>Building them</h2>
+<p>The first <code>init()</code> builds whatever is missing, whatever it is asked to solve: the 3-card table in about 10 seconds (on 8 cores) by solving every 3-card ending, then the pattern table in up to 170 seconds on all cores, using up to about 5 GB of memory. The files go to the directory given to <code>init()</code>, or the default described in the README. Because the pattern table is filled for a fixed time, tables built on different machines can differ in size; the answers are exact either way, since every pattern is a proved statement (README).</p>
+
+<h2>Reimplementing it</h2>
+<ul>
+<li>Make every node return the cards its answer depended on, and store minimal sets in the tables.</li>
+<li>Index endings leader-relative, compressed over the cards in play, with trumps in a fixed lane and the side suits sorted by length.</li>
+<li>Store small endings completely (here 2 and 3 cards); above that, store learned patterns, not positions.</li>
+<li>Expect overlap: each table alone is worth 3-4% here, the pair 30%.</li>
+</ul>
+</main>
+</body>
+</html>
