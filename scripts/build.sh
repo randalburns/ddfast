@@ -16,7 +16,9 @@
 #   XFLAGS="..."  more flags for ddfast's own sources, e.g. -DSTATS (prints search counters,
 #                 counts nodes), -DVERIFY_ORDER -DVERIFY_BOUNDS (checks the bounds and move
 #                 ordering against the DDS port on every call; aborts on any difference),
-#                 -DSELFTEST=10 (re-solves sample nodes to check the relevant-card sets).
+#                 -DSELFTEST=10 (re-solves every 10th lead node of 4 to SELFTEST_MAX cards,
+#                 default 13, with the cards outside its relevant set re-dealt; aborts if
+#                 the value changes).
 #                 Use a separate OUT for such builds.
 #   OUT=dir       output directory (default bin)
 #   LIBONLY=1     build only the library and the tool (no DDS, tests or benchmarks)
