@@ -41,7 +41,12 @@ int main(int argc, char** argv) {
   TestSet s;
   if (!read_set(argv[1], s)) return 1;
   const std::string mode = argc > 2 ? argv[2] : "bm";
-  const unsigned long long ev = mode == "cyc" ? PERF_COUNT_HW_CPU_CYCLES : PERF_COUNT_HW_BRANCH_MISSES;
+  // cyc: cycles; l1m: L1 data-cache read misses; cm: cache misses (as the kernel maps them); else branch misses.
+  const bool hwc = mode == "l1m";
+  const unsigned long long ev = mode == "cyc" ? PERF_COUNT_HW_CPU_CYCLES
+                                : hwc        ? (PERF_COUNT_HW_CACHE_L1D | PERF_COUNT_HW_CACHE_OP_READ << 8 | PERF_COUNT_HW_CACHE_RESULT_MISS << 16)
+                                : mode == "cm" ? PERF_COUNT_HW_CACHE_MISSES
+                                               : PERF_COUNT_HW_BRANCH_MISSES;
   const unsigned long long period = argc > 3 ? atoll(argv[3]) : 2003;
   const bool prof = mode != "none";
   init_or_exit();
@@ -53,7 +58,7 @@ int main(int argc, char** argv) {
   sa.sa_flags = SA_SIGINFO | SA_RESTART;
   sigaction(SIGIO, &sa, nullptr);
   perf_event_attr a{};
-  a.type = PERF_TYPE_HARDWARE;
+  a.type = hwc ? PERF_TYPE_HW_CACHE : PERF_TYPE_HARDWARE;
   a.size = sizeof a;
   a.config = ev;
   a.exclude_kernel = 1;
