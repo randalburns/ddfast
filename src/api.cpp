@@ -81,7 +81,7 @@ struct Pool {
   void worker(int w) {
     if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
     const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
-    const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = perf_open(PERF_COUNT_HW_CACHE_MISSES);
+    const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = getenv("DDF_RAW_CM") ? perf_open(strtoull(getenv("DDF_RAW_CM"), nullptr, 0), PERF_TYPE_RAW) : perf_open(PERF_COUNT_HW_CACHE_MISSES);  // DDF_RAW_CM: a raw event in place of cache misses (measurements)
     const int ft = perf_open(PERF_COUNT_HW_CACHE_DTLB | (PERF_COUNT_HW_CACHE_OP_READ << 8) | (PERF_COUNT_HW_CACHE_RESULT_MISS << 16), PERF_TYPE_HW_CACHE);
     uint64_t seen = 0;
     for (;;) {

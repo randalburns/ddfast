@@ -59,8 +59,9 @@ int main(int argc, char** argv) {
   sigaction(SIGIO, &sa, nullptr);
   perf_event_attr a{};
   a.type = hwc ? PERF_TYPE_HW_CACHE : PERF_TYPE_HARDWARE;
+  if (mode.rfind("raw:", 0) == 0) a.type = PERF_TYPE_RAW;  // raw:0xCONFIG, a raw PMU event (e.g. AMD 0x4844: fills from DRAM)
   a.size = sizeof a;
-  a.config = ev;
+  a.config = mode.rfind("raw:", 0) == 0 ? strtoull(mode.c_str() + 4, nullptr, 0) : ev;
   a.exclude_kernel = 1;
   a.exclude_hv = 1;
   a.sample_period = period;

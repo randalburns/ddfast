@@ -36,3 +36,9 @@ figure to trust, and differences of 1-3% need many pairs. Code layout alone move
 with the feature switched off (e.g. built with `XFLAGS=-DFEATURE=0`), not with an older build
 (docs/NOTES.md round 15). Branch-miss counts from
 `bprof ... none` are nearly deterministic, so they screen a change before the timing runs.
+
+## Raw PMU events
+`bprof SET raw:0xCONFIG [period]` samples any raw core event, e.g. on AMD Zen 4/5 event 0x44
+(LsAnyFillsFromSys): `raw:0x0144` fills from L2, `raw:0x0244` from L3 of the same cluster,
+`raw:0x4844` from DRAM. `DDF_RAW_CM=0x4844 bench_solve parallel ...` counts the same event in
+the worker threads in place of the cache-miss counter (column cache-misses/deal).
