@@ -79,7 +79,7 @@ struct Pool {
   alignas(64) std::atomic<size_t> next{0};
 
   void worker(int w) {
-    if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
+    if (cpus[w] >= 0) ddcore::place_thread(cpus[w], cpus.data(), int(cpus.size()));
     const int fc = perf_open(PERF_COUNT_HW_CPU_CYCLES), fi = perf_open(PERF_COUNT_HW_INSTRUCTIONS);
     const int fb = perf_open(PERF_COUNT_HW_BRANCH_MISSES), fm = getenv("DDF_RAW_CM") ? perf_open(strtoull(getenv("DDF_RAW_CM"), nullptr, 0), PERF_TYPE_RAW) : perf_open(PERF_COUNT_HW_CACHE_MISSES);  // DDF_RAW_CM: a raw event in place of cache misses (measurements)
     const int ft = perf_open(PERF_COUNT_HW_CACHE_DTLB | (PERF_COUNT_HW_CACHE_OP_READ << 8) | (PERF_COUNT_HW_CACHE_RESULT_MISS << 16), PERF_TYPE_HW_CACHE);
@@ -354,7 +354,8 @@ std::vector<int> available_cpus(bool smt) {
     char path[128];
     snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", c);
     if (FILE* f = fopen(path, "r")) { if (fscanf(f, "%ld", &mhz) != 1) mhz = 0; fclose(f); }
-    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/core_id", c);
+    // The core: the first CPU of its SMT sibling list (core_id alone repeats across sockets).
+    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", c);
     if (FILE* f = fopen(path, "r")) { if (fscanf(f, "%d", &core) != 1) core = c; fclose(f); }
     const bool sib = std::find(seen_core.begin(), seen_core.end(), core) != seen_core.end();
     if (!sib) seen_core.push_back(core);

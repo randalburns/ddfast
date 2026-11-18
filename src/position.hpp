@@ -18,5 +18,8 @@ struct Position {
 // Pins the calling thread to one CPU (as numbered by the operating system); false if that
 // fails. Used by ddfast's thread pools.
 bool pin_thread(int cpu);
+// Places a pool worker for CPU `cpu` of the pool's list (by default within its NUMA node and
+// core class; DDFAST_AFFINITY=cpu pins it to `cpu`, =none leaves it to the scheduler).
+bool place_thread(int cpu, const int* cpus, int ncpu);
 
 }  // namespace ddcore

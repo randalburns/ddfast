@@ -116,7 +116,9 @@ struct Item {
 #define PAR_SPLIT 3
 #endif
 #ifndef PAR_SPIN_US
-#define PAR_SPIN_US 3000  // helpers spin this long for the next question before they sleep
+#define PAR_SPIN_US 0  // helpers spin this long (us) for the next question before they sleep; spinning
+                       // bought nothing on an idle machine and cost 2.2x with four solve_deal_parallel
+                       // calls sharing the CPUs (issue #4)
 #endif
 const int g_split = getenv("PAR_SPLIT") ? atoi(getenv("PAR_SPLIT")) : PAR_SPLIT;  // experiments
 
@@ -199,7 +201,7 @@ struct DealPool {
     nodes.fetch_add(g_mnodes - n0, std::memory_order_relaxed);
   }
   void helper(int w, uint64_t seen) {
-    if (cpus[w] >= 0) ddcore::pin_thread(cpus[w]);
+    if (cpus[w] >= 0) ddcore::place_thread(cpus[w], cpus.data(), int(cpus.size()));
     ensure_state();
     g_hot.stop = &g_never_stop;
     for (;;) {
