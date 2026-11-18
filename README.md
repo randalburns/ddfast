@@ -3,7 +3,7 @@
 ddfast is a performance optimization of the search algorithms of
 [DDS](https://github.com/dds-bridge/dds), the widely used exact double-dummy solver for bridge.
 Given a deal, a strain and a declarer, it returns the number of tricks declarer's side takes
-with best play by both sides, the same answer as DDS, about four times faster on one core.
+with best play by both sides, the same answer as DDS, 4-5 times faster on one core.
 
 It isn't limited to full deals. Like DDS, it solves any position reached in play: a trick start
 with 1 to 13 cards in each hand, or a position in the middle of a trick. It also gives every
@@ -156,55 +156,19 @@ in size; the answers are exact either way.
 
 ## The macOS port
 
-ddfast was written for AVX-512 and BMI2. The port keeps that code as it was for
-x86-64 and adds an AArch64 version of each piece, chosen at compile time. There are two
-implementations of the vector code: AVX-512 intrinsics on x86-64 and Google Highway (static
-dispatch, 128-bit vectors) on AArch64; there is no hand-written NEON. The pieces live in
-one header, `extern/ddclaim/include/ddclaim/port.hpp`, used by the search and the endgame tables:
+The bit and vector primitives live in one header, `extern/ddclaim/include/ddclaim/port.hpp`,
+with two implementations chosen at compile time:
 
-- **pext and pdep**, which Arm lacks, are done a byte at a time through two 64 KB tables
-  (they fit in a performance core's L1 cache). The eight bytes are independent: each byte's
-  output position comes from one vector popcount and a multiply. A mask used for several calls is
-  prepared once (`ddport::BitMask`). This is the largest cost of the port: about 50
-  instructions for what is one instruction on x86. So the move generators find the heads of
-  runs of touching cards with an add-and-carry bit trick instead, without pext, and constant
-  masks become shifts.
-- **The AVX-512 blocks** become Highway code on 128-bit vectors (two 64-bit or four 32-bit
-  lanes) or plain scalar code: the transposition-table and pattern-table block matches, the
-  choice of the best remaining card, the per-suit bounds and the lead move ordering. In the
-  move ordering, the per-suit weights use four-lane vectors as before, and a branch-free scalar
-  loop over the cards takes the place of AVX-512's compress and 16-lane permutes. The lane
-  masks of the block matches are narrowed as vectors by truncation (`OrderedTruncate2To`, one
-  `uzp1` each); Highway's `OrderedDemote2MasksTo` narrows with saturation, two dependent
-  instructions each, and cost about 1% of the time per deal. Written this way the Highway code
-  makes the same search (the same node counts) as the NEON intrinsics it replaced, in the same
-  number of cycles.
-- **Thread-local state**: on macOS each thread-local variable costs a function call to find
-  its address, once in every function that uses it. The search's hot per-thread variables
-  (the hands, the lengths, the search state) are kept in one thread-local struct, so every node
-  pays one such call instead of several.
-- **The operating system**: macOS has no huge pages and no `MAP_POPULATE`, so the pattern
-  table file is mapped with 16 KB pages and read through once at load time. It cannot pin a
-  thread to a core either: the worker pool asks for the performance cores by quality-of-service
-  class instead, and `available_cpus()` returns worker slots rather than CPU numbers. The
-  hardware counters in `WorkerStats` stay 0. The coroutine stack switch (used only in builds
-  with `-DNCTX` above 1) has an AArch64 version.
+- **AVX-512 and BMI2** intrinsics where the CPU has them (x86-64).
+- **Google Highway**, the portable implementation (static dispatch, 128-bit vectors), on
+  Apple silicon. `pext` and `pdep`, which Arm lacks, are done a byte at a time through two
+  64 KB tables. x86-64 builds still require AVX-512.
 
-The search itself is unchanged, so the answers are the same: on an M5 the port gave DDS's
-answer on the public set, on 1,700 random problems and on 260 random full tables, on one
-thread and in parallel. A `-DVERIFY_ORDER -DVERIFY_BOUNDS` build, which checks the move
-ordering and the bounds against the line-by-line port of DDS at every node, found no
-difference.
-
-Where the time goes: the port runs about 55M instructions per deal of the public set, against
-about 40M on x86, mostly for pext and pdep and the narrower vectors. The M5 runs them at about
-3.6 instructions per cycle, so ddfast takes about as many cycles per deal as on Zen 5 (15.5M
-against 16.1M). DDS gains far more from Apple's core: about 48M cycles per deal on the M5,
-against about 80M on Zen 5. That is why the ratio to DDS is about 3x on the Mac and 4x on
-Zen 5. Most of what remains is waiting for memory in the per-deal table and in the 1.1 GB
-of endgame tables (which on macOS cannot use huge pages; on Linux they are worth about 2%).
-Profile-guided optimisation saves about 7% of the instructions on the M5 but only about 2% of
-the cycles, so the build does not use it.
+macOS also has no huge pages and cannot pin threads: the tables are read through 16 KB pages,
+and the worker pool asks for the performance cores by quality-of-service class instead. The
+search is unchanged, so the answers are the same. On an M5, ddfast takes about as many cycles
+per deal as on Zen 5 (15.5M against 16.1M), but DDS runs much faster there, so the ratio to
+DDS is about 3x.
 
 ## The command
 
