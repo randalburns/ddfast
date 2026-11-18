@@ -7,3 +7,5 @@
 # The Python extension (python/build.sh) and Python caches
 python/ddfast/*.so
 __pycache__/
+# DDS writes dump.txt on error cases (python/tests/test_dds_capi.py runs a real libdds)
+dump.txt
