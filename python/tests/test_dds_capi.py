@@ -1,4 +1,4 @@
-"""libdds.so (DDS's C interface on ddfast) against a real DDS library, through ctypes.
+"""libdds.so (libdds.dylib on macOS: DDS's C interface on ddfast) against a real DDS library, through ctypes.
 
     python3 python/tests/test_dds_capi.py <reference libdds> [positions] [seed]
 
@@ -19,7 +19,7 @@ import sys
 import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OURS = os.path.join(HERE, "..", "ddfast", "libdds.so")
+OURS = os.path.join(HERE, "..", "ddfast", "libdds.dylib" if sys.platform == "darwin" else "libdds.so")
 
 
 class DealPBN(ctypes.Structure):
