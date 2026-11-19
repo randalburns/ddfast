@@ -9,10 +9,13 @@
 #   bin/bench_batch      batches against DDS SolveAllBoards / CalcAllTables (bench/bench_batch.cpp)
 #   bin/libdds.a         DDS (extern/dds), for the tests and benchmarks only
 #
-# Needs an x86-64 CPU with AVX-512 and BMI2 (-march=native) on Linux, or Apple silicon on
-# macOS (-mcpu=native) with Google Highway's headers (brew install highway; Highway in place
-# of AVX-512, see src/port.hpp; HWY_INC overrides where they are
-# found), and the submodules
+# Builds for the build machine's CPU (-march=native / -mcpu=native; ARCH to choose another).
+# x86-64 CPUs with AVX-512 (the Ice Lake set: Ice Lake, Sapphire Rapids and later Xeons, Zen 4
+# and 5) use the AVX-512 code; any other x86-64 CPU, and AArch64 (Apple silicon, Linux Arm),
+# use Google Highway's headers (a recent release; tested with 1.4.0) in its place: build.sh looks
+# in build/highway (git clone --depth 1 --branch 1.4.0 https://github.com/google/highway
+# build/highway), Homebrew's prefix (brew install highway) and /usr/local and /usr/include;
+# HWY_INC overrides. See src/port.hpp. Also needs the submodules
 # (git clone --recursive, or git submodule update --init). Uses clang++ if present, else g++;
 # set CXX to choose. Environment:
 #   XFLAGS="..."  more flags for ddfast's own sources, e.g. -DSTATS (prints search counters,
@@ -24,6 +27,7 @@
 #                 Use a separate OUT for such builds.
 #   OUT=dir       output directory (default bin)
 #   ARCH="..."    target flags in place of -march=native / -mcpu=native
+#   FORCE_HWY=1   the Highway vector code even where the target has AVX-512 (for testing)
 #   LIBONLY=1     build only the library and the tool (no DDS, tests or benchmarks)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -50,40 +54,18 @@ if [ -z "${CXX:-}" ]; then
 fi
 XFLAGS=${XFLAGS:-}
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-# ARCH: the target flags; by default the build machine's own CPU. CI sets it (for example
-# -march=icelake-server) to build the AVX-512 path on a runner without AVX-512 and run it under
-# Intel SDE.
-if [ -z "${ARCH:-}" ]; then case "$(uname -m)" in
-  arm64|aarch64)
-    ARCH="-mcpu=native"
-    # Apple clang may know the CPU only as an older one (an M5 as apple-m3); add the scalar
-    # popcount and count-trailing-zeros instructions (CSSC) when the CPU has them.
-    [ "$(sysctl -n hw.optional.arm.FEAT_CSSC 2>/dev/null)" = 1 ] && ARCH="-mcpu=native+cssc" ;;
-  *) ARCH="-march=native" ;;
-esac; fi
-case "$(uname -m)" in
-  arm64|aarch64)
-    # Google Highway (headers only): $HWY_INC, else Homebrew's prefix, else the system's.
-    if [ -z "${HWY_INC:-}" ]; then
-      for d in "$(brew --prefix 2>/dev/null)/include" /opt/homebrew/include /usr/local/include /usr/include; do
-        [ -f "$d/hwy/highway.h" ] && { HWY_INC=$d; break; }
-      done
-    fi
-    if [ -z "${HWY_INC:-}" ] || [ ! -f "$HWY_INC/hwy/highway.h" ]; then
-      echo "build.sh: Google Highway not found; brew install highway (or set HWY_INC)" >&2
-      exit 1
-    fi
-    ARCH="$ARCH -I$HWY_INC" ;;
-esac
+# ARCH: the target flags, and Highway when the target needs it (scripts/target.sh).
+. "$ROOT/scripts/target.sh"
 BASE="-std=c++20 -O3 -DNDEBUG $ARCH"
 INC="-Iinclude -Isrc"
 DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
-# The library: the endgame tables (compiled without XFLAGS) and the search.
-rm -f "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
+# The library: the CPU check and the endgame tables (compiled without XFLAGS) and the search.
+rm -f "$OUT/obj/cpu.o" "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
 # shellcheck disable=SC2086
 {
+  $CXX $BASE -Isrc -c src/cpu.cpp -o "$OUT/obj/cpu.o" &
   $CXX $BASE -Isrc -c src/tables.cpp -o "$OUT/obj/tables.o" &
   $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
   $CXX $BASE $XFLAGS $INC -Isrc -c src/par_deal.cpp -o "$OUT/obj/par_deal.o" &
@@ -91,9 +73,9 @@ rm -f "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/ap
   $CXX $BASE $XFLAGS $INC -c src/play.cpp -o "$OUT/obj/play.o" &
   wait
 }
-[ -f "$OUT/obj/tables.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
+[ -f "$OUT/obj/cpu.o" ] && [ -f "$OUT/obj/tables.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
 rm -f "$OUT/libddfast.a"
-ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/tables.o"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/tables.o" "$OUT/obj/cpu.o"
 # shellcheck disable=SC2086
 $CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
 [ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }

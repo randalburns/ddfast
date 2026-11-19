@@ -5,6 +5,9 @@
 //   -d, --dir DIR     the table directory (default $DDFAST_TABLES, else build/tables)
 //   -s, --strain X    default strain for lines that give none: S H D C or N
 //   -l, --declarer X  default declarer for lines that give none: N E S W
+//   --cpu             prints the code paths this build uses and the CPU's relevant features,
+//                     then exits (0: the CPU runs this build; a CPU that lacks something the
+//                     build uses stops every ddfast program at load with a message, status 1)
 //
 // Input: one deal per line, in PBN notation, optionally inside a PBN tag:
 //   N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85
@@ -27,6 +30,7 @@
 #include <vector>
 
 #include "ddfast.hpp"
+#include "port.hpp"
 
 namespace {
 
@@ -89,6 +93,26 @@ struct Line {
 
 }  // namespace
 
+// --cpu: the build's code paths and what this CPU offers.
+static int cpu_report() {
+  printf("build: %s\n", ddport::build_paths());
+#if DDPORT_X86
+  __builtin_cpu_init();
+  const bool avx512 = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512vl") &&
+                      __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512dq") &&
+                      __builtin_cpu_supports("avx512vbmi2") && __builtin_cpu_supports("avx512vpopcntdq") &&
+                      __builtin_cpu_supports("avx512bitalg") && __builtin_cpu_supports("gfni");
+  printf("cpu: AVX-512 (Ice Lake set) %s, AVX2 %s, BMI2 %s\n", avx512 ? "yes" : "no",
+         __builtin_cpu_supports("avx2") ? "yes" : "no", __builtin_cpu_supports("bmi2") ? "yes" : "no");
+  if (avx512 && !DDPORT_AVX512) printf("note: this CPU could run the AVX-512 build (faster): build with -march=native\n");
+#else
+  printf("cpu: AArch64 (Highway NEON)\n");
+#endif
+  const char* m = ddport::cpu_check();
+  printf("%s\n", m ? m : "ok: this CPU runs this build");
+  return m ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
   int threads = 1, def_strain = -1, def_decl = -1;
   const char* dir = nullptr;
@@ -106,8 +130,9 @@ int main(int argc, char** argv) {
     else if (a == "-d" || a == "--dir") { next(); dir = argv[i]; }
     else if (a == "-s" || a == "--strain") def_strain = strain_of(next());
     else if (a == "-l" || a == "--declarer") def_decl = seat_of(next()[0]);
+    else if (a == "--cpu") return cpu_report();
     else if (a == "-h" || a == "--help") {
-      fprintf(stderr, "usage: ddfast [-t threads] [-d table dir] [-s strain] [-l declarer] [file ...]\n");
+      fprintf(stderr, "usage: ddfast [-t threads] [-d table dir] [-s strain] [-l declarer] [--cpu] [file ...]\n");
       return 0;
     } else files.push_back(a);
   }

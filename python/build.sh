@@ -4,7 +4,7 @@
 # $PYTHON (pip install nanobind) and the extern/dds submodule (DDS's PBN parser and par code
 # are compiled in). Then: PYTHONPATH=python python3 -c "import ddfast"
 #   PYTHON=python3   the Python whose headers and nanobind to use
-#   ARCH=...         target flags (default -march=native, as scripts/build.sh)
+#   ARCH=...         target flags (default the build machine's CPU; see scripts/target.sh)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -20,7 +20,7 @@ if [ -z "${CXX:-}" ]; then
     done
   fi
 fi
-ARCH=${ARCH:--march=native}
+. "$ROOT/scripts/target.sh"  # ARCH, with Highway when the target needs it
 OBJ=bin/py/obj
 mkdir -p "$OBJ"
 BASE="-std=c++20 -O3 -DNDEBUG -fPIC -fvisibility=hidden $ARCH"
@@ -29,7 +29,7 @@ PY="-I$PYINC -I$NB/include -DPy_LIMITED_API=0x030C0000"
 echo "python/build.sh: $CXX, nanobind $NB"
 # shellcheck disable=SC2086
 {
-  for f in tables solver par_deal api play; do $CXX $BASE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/$f.o & done
+  for f in cpu tables solver par_deal api play; do $CXX $BASE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/$f.o & done
   $CXX $BASE $DDS -c extern/dds/library/src/pbn.cpp -o $OBJ/dds_pbn.o &
   $CXX $BASE $DDS -c extern/dds/library/src/par.cpp -o $OBJ/dds_par.o &
   $CXX $BASE $DDS -c extern/dds/library/src/dealer_par.cpp -o $OBJ/dds_dealer_par.o &

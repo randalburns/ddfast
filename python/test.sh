@@ -18,9 +18,10 @@ if [ -z "${CXX:-}" ]; then
     done
   fi
 fi
+. "$ROOT/scripts/target.sh"  # ARCH, as for the library
 mkdir -p bin/py
 # shellcheck disable=SC2086
-$CXX -std=c++20 -O2 -march=native -Iinclude -Ipython/src -Iextern/dds/library/src -Iextern/dds/library/src/api \
+$CXX -std=c++20 -O2 $ARCH -Iinclude -Ipython/src -Iextern/dds/library/src -Iextern/dds/library/src/api \
   python/src/dds_compat.cpp python/tests/compat_test.cpp bin/libddfast.a bin/libdds.a -pthread -o bin/py/compat_test
 (cd bin/py && ./compat_test "${1:-2000}" "${2:-1}")  # in bin/py: DDS writes dump.txt for the error cases
 PYTHONPATH=python $PYTHON python/tests/test_dds3.py
