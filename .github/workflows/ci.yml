@@ -4,7 +4,8 @@
 #   linux-x86-hwy  every time: the Highway path on x86 without AVX-512, for x86-64-v3 (AVX2,
 #               BMI2) and x86-64-v2 (SSE4.2, no BMI2: the table pext/pdep). The v3 build is also
 #               run under SDE as a Sandy Bridge (no AVX2, no BMI2), where it must stop at load
-#               with ddfast's CPU message (status 1), not crash on an illegal instruction.
+#               with ddfast's CPU message (status 1), not crash on an illegal instruction
+#               (skipped with a warning when SDE cannot be downloaded).
 #   linux-arm   every time: the Highway path (AArch64) on Linux (ELF, clang/GCC).
 #   macos       every time: the Highway path with Apple clang and the macOS system code.
 #   ci-ok       the one check to require in branch protection: passes when every job above
@@ -108,10 +109,18 @@ jobs:
           key: tables-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/tables.cpp', 'src/tables.hpp', 'src/position.hpp') }}
       - name: Build and test
         run: HWY_INC=$PWD/highway sh scripts/ci.sh
+      # Intel's download server sometimes refuses runners (HTTP 403); tests/cpu_check.sh (in
+      # ci.sh above) already tested the check without an emulator, so this one is skipped
+      # with a warning then rather than failing.
       - uses: petarpetrovt/setup-sde@v2.4
+        id: sde
         if: matrix.arch == 'x86-64-v3'
+        continue-on-error: true
+      - name: SDE unavailable
+        if: matrix.arch == 'x86-64-v3' && steps.sde.outcome != 'success'
+        run: echo "::warning::Intel SDE could not be downloaded; the Sandy Bridge CPU-check step was skipped"
       - name: CPU check on a CPU without AVX2 and BMI2 (SDE as Sandy Bridge)
-        if: matrix.arch == 'x86-64-v3'
+        if: matrix.arch == 'x86-64-v3' && steps.sde.outcome == 'success'
         run: |
           set +e
           out=$("$SDE_PATH/sde64" -snb -- bin/ddfast --cpu 2>&1); st=$?
