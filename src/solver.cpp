@@ -55,7 +55,7 @@ inline u64 lens48(u64 x) {
 }
 // The 16 nibbles of x as bytes.
 inline void spread_nibbles(u64 x, uint8_t* out) {
-#if DDPORT_X86
+#if DDPORT_AVX512
   _mm_storeu_si128((__m128i*)out, _mm_and_si128(_mm_set1_epi8(15), _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)x), _mm_cvtsi64_si128((long long)(x >> 4)))));
 #else
   namespace hn = hwy::HWY_NAMESPACE;
@@ -406,7 +406,7 @@ struct NB {
     h[0] = H[0], h[1] = H[1], h[2] = H[2], h[3] = H[3], lens = LENS;
     all = a;
     spread_nibbles(LENS, ln);
-#if DDPORT_X86
+#if DDPORT_AVX512
     __m256i x = _mm256_and_si256(_mm256_set1_epi64x((long long)a), _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0)));
     const __m256i top = _mm256_set1_epi64x((long long)(1ull << 63));
     const __m256i v1 = _mm256_set1_epi64x((long long)H[1]), v2 = _mm256_set1_epi64x((long long)H[2]), v3 = _mm256_set1_epi64x((long long)H[3]);
@@ -485,7 +485,7 @@ __attribute__((always_inline)) inline int nq_quick(const NB& b, int hand, int n,
   // a second card of partner's under the leader's top (the opponents following or out of trumps).
   {
     auto q = [](unsigned m, int x) { return (m >> (4 * x)) & 15u; };
-#if DDPORT_X86
+#if DDPORT_AVX512
     const __m128i lv = _mm_loadu_si128((const __m128i*)b.ln);
     const unsigned nzm = _mm_test_epi8_mask(lv, lv), g2m = _mm_cmpgt_epi8_mask(lv, _mm_set1_epi8(1));
     const __m256i vw = _mm256_load_si256((const __m256i*)b.wb), vP = _mm256_set1_epi64x((long long)b.h[P]);
@@ -979,7 +979,7 @@ inline bool dds_bounds(int n, int L, int target, u64 all, bool& filled, u64& R, 
 #else
   // The same for the four suits at once: per lane, the side's cards above the other side's
   // highest card (lanes are disjoint, so one popcount of their union).
-#if DDPORT_X86
+#if DDPORT_AVX512
   const __m256i lanes = _mm256_set_epi64x((long long)LANE(3), (long long)LANE(2), (long long)LANE(1), (long long)LANE(0));
   const __m256i oth = _mm256_and_si256(_mm256_set1_epi64x((long long)(all & ~side)), lanes);
   const __m256i below = _mm256_srlv_epi64(_mm256_set1_epi64x(-1), _mm256_lzcnt_epi64(oth));
@@ -1266,7 +1266,7 @@ inline int native_order_scalar(int n, int L, u64 hint, u64 all, u64* cards, uint
   return nm;
 }
 
-#if DDPORT_ARM
+#if DDPORT_HWY
 // native_order with Highway: the per-suit part as in the AVX-512 version below (one 32-bit lane
 // per suit in 128-bit vectors), then a branch-free scalar loop over the cards, which looks up
 // each card's class in per-suit tables (in place of AVX-512's compress and permutes).
@@ -1415,7 +1415,7 @@ template <bool NT>
 inline int native_order(int n, int L, u64 hint, u64 all, u64* cards, uint16_t* key) {
 #if defined(OLD_ORDER)
   return native_order_scalar<NT>(n, L, hint, all, cards, key);
-#elif DDPORT_ARM
+#elif DDPORT_HWY
   return native_order_hwy<NT>(n, L, hint, all, cards, key);
 #else
   using V = __m128i;
@@ -1763,7 +1763,7 @@ inline bool later_tricks(int L, int need, u64 all, u64& R) {
 // Transposition-table block matching (8 entries a block). Narrow entries: e[0..7] the masked
 // values, e[8..15] the masks with the bounds bits; wide entries: e[0..7] the masks with the
 // bounds, e[8..15] and e[16..23] the two masked values.
-#if DDPORT_X86 && !defined(ABL_SCALAR_TT)
+#if DDPORT_AVX512 && !defined(ABL_SCALAR_TT)
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   const __m512i vb = _mm512_load_si512(e + 8);
   const unsigned k = _mm512_cmpeq_epi64_mask(_mm512_and_si512(vb, _mm512_set1_epi64((long long)own)), _mm512_load_si512(e));
@@ -1786,7 +1786,7 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
                                       _mm512_set_epi64(7, 6, 5, 4, 3, 2, 1, 0));
   return _mm512_mask_reduce_min_epu64(__mmask8(kd), pcv);
 }
-#elif DDPORT_X86  // ABL_SCALAR_TT: the same, one entry at a time
+#elif DDPORT_AVX512  // ABL_SCALAR_TT: the same, one entry at a time
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   unsigned k = 0;
   for (int i = 0; i < 8; i++) k |= unsigned((e[8 + i] & own) == e[i] && (e[8 + i] & dec)) << i;
@@ -1810,7 +1810,7 @@ inline u64 tt_min_pc(const u64* v, u64 m, unsigned kd) {
   }
   return best;
 }
-#else  // DDPORT_ARM: Highway
+#else  // DDPORT_HWY: Highway
 inline unsigned tt_match_narrow(const u64* e, u64 own, u64 dec) {
   namespace hn = hwy::HWY_NAMESPACE;
   const ddport::D64 d;
@@ -3111,6 +3111,10 @@ namespace ddfast::detail {
 
 
 void init(const char* dir, bool map_tables) {
+  if (const char* m = ddport::cpu_check()) {
+    fprintf(stderr, "%s\n", m);
+    abort();
+  }
   ensure_state();
   // The endgame tables: the two-card table (built in memory), the three-card table
   // and the four-card pattern table, loaded from the table directory or built there.
