@@ -1,7 +1,14 @@
-// Portability layer: the bit and vector operations ddfast uses, in two
-// implementations: x86-64 (BMI2 and AVX-512 intrinsics, the original instructions) and AArch64
-// (Apple silicon: the vector code written with Google Highway, static dispatch on 128-bit
-// vectors, and table lookups or bit tricks in place of pext/pdep, which Arm lacks).
+// Portability layer: the bit and vector operations ddfast uses. Two independent choices, both
+// made at compile time from the target flags (-march=...):
+//   vector code  DDPORT_AVX512: AVX-512 intrinsics (the original instructions), on x86-64 with
+//                the Ice Lake set (F, VL, BW, DQ, VBMI2, VPOPCNTDQ, BITALG, GFNI); otherwise
+//                DDPORT_HWY: Google Highway, static dispatch on 128-bit vectors (Arm NEON, or
+//                SSE4 / AVX2 on x86-64 without that set).
+//   pext/pdep    DDPORT_PEXT: BMI2's instructions, on x86-64 with BMI2 (unless DDPORT_SOFT_BITS,
+//                for CPUs where they are slow microcode: AMD before Zen 3); otherwise table
+//                lookups and bit tricks (Arm, and x86-64 without BMI2).
+// DDPORT_FORCE_HWY selects Highway even where AVX-512 is available (for testing).
+// ddport::cpu_check() (tables.cpp) tells, at run time, whether the CPU has what the build uses.
 #pragma once
 
 #include <bit>
@@ -12,21 +19,54 @@
 #define DDPORT_X86 1
 #define DDPORT_ARM 0
 #elif defined(__aarch64__)
-#include <hwy/highway.h>
 #define DDPORT_X86 0
 #define DDPORT_ARM 1
 #else
-#error "ddfast needs x86-64 (AVX-512, BMI2) or AArch64"
+#error "ddfast needs x86-64 or AArch64"
+#endif
+
+#if DDPORT_X86 && !defined(DDPORT_FORCE_HWY) && defined(__AVX512F__) && defined(__AVX512VL__) && \
+    defined(__AVX512BW__) && defined(__AVX512DQ__) && defined(__AVX512VBMI2__) &&                  \
+    defined(__AVX512VPOPCNTDQ__) && defined(__AVX512BITALG__) && defined(__GFNI__)
+#define DDPORT_AVX512 1
+#define DDPORT_HWY 0
+#else
+// Highway's x86 SSE4 and AVX2 targets otherwise require AES and PCLMUL, which -march=x86-64-v2
+// and -v3 do not enable (and ddfast does not use).
+#if DDPORT_X86 && !defined(HWY_DISABLE_PCLMUL_AES)
+#define HWY_DISABLE_PCLMUL_AES
+#endif
+#include <hwy/highway.h>
+#define DDPORT_AVX512 0
+#define DDPORT_HWY 1
+#endif
+
+// ABL_SOFT_BITS is the older name of DDPORT_SOFT_BITS (bench/loo.sh).
+#if DDPORT_X86 && defined(__BMI2__) && !defined(DDPORT_SOFT_BITS) && !defined(ABL_SOFT_BITS)
+#define DDPORT_PEXT 1
+#else
+#define DDPORT_PEXT 0
 #endif
 
 namespace ddport {
 
 typedef uint64_t u64;
-#if DDPORT_ARM
+#if DDPORT_HWY
 namespace hn = hwy::HWY_NAMESPACE;
 #endif
 
 inline int clz64(u64 x) { return std::countl_zero(x); }  // 64 for 0, like lzcnt
+// The bits of x in reverse order (one instruction on Arm; clang's builtin, else by swaps).
+inline u64 bitrev64(u64 x) {
+#if __has_builtin(__builtin_bitreverse64)
+  return __builtin_bitreverse64(x);
+#else
+  x = (x >> 1 & 0x5555555555555555ull) | (x & 0x5555555555555555ull) << 1;
+  x = (x >> 2 & 0x3333333333333333ull) | (x & 0x3333333333333333ull) << 2;
+  x = (x >> 4 & 0x0F0F0F0F0F0F0F0Full) | (x & 0x0F0F0F0F0F0F0F0Full) << 4;
+  return __builtin_bswap64(x);
+#endif
+}
 inline int ctz64(u64 x) { return std::countr_zero(x); }  // 64 for 0, like tzcnt
 #ifdef ABL_NOPREFETCH  // leave-one-out: no software prefetch
 inline void prefetch(const void*) {}
@@ -54,7 +94,7 @@ inline u64 ticks() {
 // replaces BMI2 pext/pdep on x86 by the byte-table code used on Arm; ABL_SCALAR_TT,
 // ABL_SCALAR_PMATCH and ABL_SCALAR_PICK replace the AVX-512 match8, pmatch8 and best_key
 // by scalar loops.
-#if DDPORT_X86 && !defined(ABL_SOFT_BITS)
+#if DDPORT_PEXT
 
 inline u64 pext64(u64 x, u64 m) { return _pext_u64(x, m); }
 inline u64 pdep64(u64 x, u64 m) { return _pdep_u64(x, m); }
@@ -72,7 +112,7 @@ struct BitMask {
   u64 dep(u64 x) const { return _pdep_u64(x, m); }
 };
 
-#else  // software pext/pdep: AArch64, or x86 with ABL_SOFT_BITS
+#else  // software pext/pdep: AArch64, x86 without BMI2, or DDPORT_SOFT_BITS
 
 // pext/pdep a byte at a time through 256 x 256 tables (64 KB each, so both stay in a
 // performance core's 128 KB L1). The eight bytes are independent: each one's output offset
@@ -99,11 +139,11 @@ inline const ByteTables g_bytes;
 
 // Byte k: the number of mask bits in bytes 0 .. k-1.
 __attribute__((always_inline)) inline u64 byte_offsets(u64 m) {
-#if DDPORT_ARM
+#if DDPORT_HWY
   const hn::Full64<uint8_t> d8;
   const hn::Full64<uint64_t> d64;
   const u64 c = hn::GetLane(hn::BitCast(d64, hn::PopulationCount(hn::BitCast(d8, hn::Set(d64, m)))));
-#else  // the popcount of each byte, by halves (x86 with ABL_SOFT_BITS)
+#else  // the popcount of each byte, by halves
   u64 c = m - ((m >> 1) & 0x5555555555555555ull);
   c = (c & 0x3333333333333333ull) + ((c >> 2) & 0x3333333333333333ull);
   c = (c + (c >> 4)) & 0x0F0F0F0F0F0F0F0Full;
@@ -151,7 +191,7 @@ inline u64 lane_nibbles(u64 x, int k) {
 
 #endif
 
-#if DDPORT_X86
+#if DDPORT_AVX512
 
 // Bytes 0..7 of x reordered by ctl[0..7] (an index 0..7, or 0x80 for a zero byte). ctl is
 // 16-byte aligned.
@@ -209,7 +249,7 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
 #endif
 }
 
-#else  // DDPORT_ARM: Highway
+#else  // DDPORT_HWY: Highway
 
 inline u64 shuf8(u64 x, const uint8_t* ctl) {
   const hn::Full64<uint8_t> d8;
@@ -271,7 +311,7 @@ inline unsigned best_key(const u64* cards, const uint16_t* key, u64 cand) {
 // 16s+15. `present` is the set of cards still in play; `mine` is a subset of it.
 constexpr u64 GUARD_BITS = 0x8000800080008000ull;
 
-#if DDPORT_X86
+#if DDPORT_PEXT
 // One card per run of touching cards (the top one), and the heads with another of mine
 // directly below in play (the run has more cards).
 inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
@@ -284,7 +324,7 @@ inline u64 run_bottom_of(u64 c, u64 rest, u64 present) {
   const u64 p = present | GUARD_BITS;
   const u64 pm = pext64(rest, p), bc = pext64(c, p);
   const u64 t = ~pm & (bc - 1);
-  const u64 bb = 1ull << (64 - _lzcnt_u64(t));  // just above the highest gap below c, or bit 0
+  const u64 bb = 1ull << (64 - clz64(t));  // just above the highest gap below c, or bit 0
   return pdep64(bb, p);
 }
 #else
@@ -300,10 +340,10 @@ inline u64 next_up(u64 seeds, u64 present) {
 // mine. With the bits reversed, "above" becomes "below": the same carry from every other
 // card in play and from each suit's guard.
 inline u64 run_heads(u64 mine, u64 present, u64* seq = nullptr) {
-  const u64 gaps = __builtin_bitreverse64(~present & ~GUARD_BITS);
-  const u64 seeds = __builtin_bitreverse64((present & ~mine) | GUARD_BITS) << 1;
+  const u64 gaps = bitrev64(~present & ~GUARD_BITS);
+  const u64 seeds = bitrev64((present & ~mine) | GUARD_BITS) << 1;
   const u64 stop = (((seeds & gaps) + gaps) & ~gaps) | (seeds & ~gaps);
-  const u64 h = __builtin_bitreverse64(__builtin_bitreverse64(mine) & stop);
+  const u64 h = bitrev64(bitrev64(mine) & stop);
   if (seq) *seq = h & next_up(mine, present);
   return h;
 }
@@ -377,6 +417,13 @@ inline void* init_stack(void* top, void (*entry)()) {
   return f;
 #endif
 }
+
+// Null if this CPU has every instruction set the build was compiled for, else a message naming
+// what is missing and how to build for this CPU. Checked by ddfast::init() (which aborts with
+// the message) and before any code that might use those instructions.
+const char* cpu_check();
+// The build's code paths, e.g. "AVX-512, BMI2" or "Highway (AVX2), soft pext".
+const char* build_paths();
 
 // Thread placement. Linux pins to a CPU; macOS cannot pin, so it asks for the performance
 // cores through the thread's QoS class instead (returns false: not pinned).

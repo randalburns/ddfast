@@ -14,6 +14,10 @@ export DDFAST_TABLE_SECONDS="${DDFAST_TABLE_SECONDS:-20}" DDFAST_TABLE_MB="${DDF
 mkdir -p "$DDFAST_TABLES"
 sh scripts/build.sh
 RUN=${RUN:-}
+# The build's code paths and the CPU's features; fails if the CPU cannot run the build.
+$RUN bin/ddfast --cpu
+# The run-time CPU check itself (runs its programs directly, so not under an emulator).
+[ -z "$RUN" ] && sh tests/cpu_check.sh
 # shellcheck disable=SC2086
 $RUN bin/test_ddfast ${TESTS:-quick}
 # shellcheck disable=SC2086

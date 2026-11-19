@@ -15,7 +15,7 @@ It keeps DDS's approach to the double-dummy search: an alpha-beta search asked a
 "at least t tricks?" questions, a transposition table of positions reduced to the cards that
 matter, DDS's quick-tricks and later-tricks bounds, and DDS's move-ordering heuristics (ported
 from DDS line by line and checked against it, `src/dds_port.hpp`). What changes is how they
-run: positions are 64-bit hand words handled with bit operations and AVX-512 (Google Highway on Apple silicon), the bounds and
+run: positions are 64-bit hand words handled with bit operations and AVX-512 (Google Highway on Apple silicon and other x86-64 CPUs), the bounds and
 the move ordering work on those words without DDS's per-node bookkeeping, the transposition
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
 guess, and the last 2, 3 and 4 cards of each hand are looked up in precomputed endgame tables
@@ -73,7 +73,7 @@ Positions with fewer cards are faster still, relative to DDS (random trick start
 time, `bench_positions`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
 at 7 and 58x at 5. Batches of small positions (`solve_positions`) gain another 1.2-1.5x.
 
-On one performance core of an Apple M5 (macOS; see "The macOS port" below), against
+On one performance core of an Apple M5 (macOS; see "Code paths and the macOS port" below), against
 the same DDS built with the same compiler and flags, cycles per deal (min of 3 alternating
 runs):
 
@@ -87,10 +87,11 @@ most of the smaller ratio.
 
 ## Requirements
 
-- Linux on x86-64 with AVX-512 and BMI2 (Zen 4/5, Intel Ice Lake and later): the build uses
-  `-march=native`.
+- Linux on x86-64: the build uses `-march=native`. CPUs with AVX-512 (the Ice Lake set: Zen
+  4/5, Intel Ice Lake, Sapphire Rapids and later Xeons) use the AVX-512 code; any other x86-64
+  CPU uses Google Highway's headers in its place (see "Code paths" below).
 - Or macOS on Apple silicon (M1 and later), with the Xcode Command Line Tools: the build uses
-  `-mcpu=native`. See "The macOS port" below.
+  `-mcpu=native`. See "Code paths and the macOS port" below.
 - A C++20 compiler: clang++ (preferred) or g++. No cmake or other build system.
 - About 1.2 GB of memory for the tables, and 1.1 GB of disk for their files.
 
@@ -162,15 +163,34 @@ kernel gives file mappings 4 KB pages only, which is why mapping is not the defa
 The pattern table is filled for a fixed time, so tables built on different machines can differ
 in size; the answers are exact either way.
 
-## The macOS port
+## Code paths and the macOS port
 
-The bit and vector primitives live in one header, `src/port.hpp`,
-with two implementations chosen at compile time:
+The bit and vector primitives live in one header, `src/port.hpp`, with two choices made at
+compile time from the target flags:
 
-- **AVX-512 and BMI2** intrinsics where the CPU has them (x86-64).
-- **Google Highway**, the portable implementation (static dispatch, 128-bit vectors), on
-  Apple silicon. `pext` and `pdep`, which Arm lacks, are done a byte at a time through two
-  64 KB tables. x86-64 builds still require AVX-512.
+- **Vector code:** AVX-512 intrinsics where the target has the Ice Lake set (F, VL, BW, DQ,
+  VBMI2, VPOPCNTDQ, BITALG, GFNI); otherwise **Google Highway** (headers only, static
+  dispatch, 128-bit vectors): NEON on Arm, AVX2, SSE4 or SSE2 on other x86-64 CPUs.
+- **`pext` and `pdep`:** BMI2's instructions where the target has them, except on AMD Zen 1
+  and 2, where they are slow microcode; otherwise done a byte at a time through two 64 KB
+  tables (Arm, and x86-64 without BMI2).
+
+`build.sh` needs Highway only when the target lacks AVX-512. It looks in `build/highway`,
+Homebrew's prefix, `/usr/local/include` and `/usr/include` (`HWY_INC` overrides); releases as
+old as Ubuntu 24.04's `libhwy-dev` (1.0.7) lack operations ddfast uses, so on Linux get the
+tested release with
+`git clone --depth 1 --branch 1.4.0 https://github.com/google/highway build/highway`.
+To build for other machines, set `ARCH`: `ARCH=-march=x86-64-v3` runs on any x86-64 CPU with
+AVX2 and BMI2 (Intel since 2013, AMD since 2015), `ARCH=-march=x86-64-v2` on nearly any
+x86-64 CPU still in use. `FORCE_HWY=1` builds the Highway code even for an AVX-512 target.
+Every path gives the same answers and visits the same nodes. Cycles per deal on one Zen 5
+core (public set; the AVX-512 build = 1.00): Highway AVX2 with BMI2 (`x86-64-v3`) 1.11,
+Highway SSE4 with table `pext` (`x86-64-v2`) 1.47, Highway SSE2 (`x86-64`) 1.62.
+
+`bin/ddfast --cpu` prints the build's code paths and the CPU's features. Every ddfast
+program checks at load time that the CPU has each instruction set the build was compiled
+for, and if not stops with a message naming what is missing (status 1) rather than failing on
+an illegal instruction later.
 
 macOS also has no huge pages and cannot pin threads: the tables are read through 16 KB pages,
 and the worker pool asks for the performance cores by quality-of-service class instead. The
@@ -223,8 +243,8 @@ ddfast::pin_thread(fast[0]);                       // the calling thread works a
 int dtricks = ddfast::solve_deal_parallel(p, fast, 4);
 ```
 
-Link with `bin/libddfast.a -pthread`, and compile with `-march=native` (or another target with
-AVX-512 and BMI2) and `-Iinclude`.
+Link with `bin/libddfast.a -pthread`, and compile with the same target flags as the library
+(`-march=native` by default) and `-Iinclude`.
 
 ### Positions, play and par
 
@@ -346,7 +366,7 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `src/play.cpp` | play positions, card results, play analysis, targets and par |
 | `src/guess_*.inc` | fitted first guesses of the result |
 | `src/tables.hpp`, `src/tables.cpp` | the endgame tables: their layout and probes, and the code that loads and builds them |
-| `src/port.hpp` | the bit and vector primitives: AVX-512 and BMI2 on x86-64, Google Highway on Apple silicon |
+| `src/port.hpp` | the bit and vector primitives: AVX-512 and BMI2 on x86-64, Google Highway on Arm and on x86-64 without AVX-512 |
 | `extern/dds` | DDS (submodule), for tests and benchmarks; the Python module compiles in its PBN parser and par code |
 | `python/` | the Python module (`dds3` interface), its build script and tests |
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
