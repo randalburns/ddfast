@@ -29,6 +29,8 @@
 #   ARCH="..."    target flags in place of -march=native / -mcpu=native
 #   FORCE_HWY=1   the Highway vector code even where the target has AVX-512 (for testing)
 #   LIBONLY=1     build only the library and the tool (no DDS, tests or benchmarks)
+#   PIC=1         position-independent code (-fPIC), for linking libddfast.a into a shared
+#                 library (Linux; macOS code always is)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -57,6 +59,7 @@ JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # ARCH: the target flags, and Highway when the target needs it (scripts/target.sh).
 . "$ROOT/scripts/target.sh"
 BASE="-std=c++20 -O3 -DNDEBUG $ARCH"
+[ "${PIC:-0}" = 1 ] && BASE="$BASE -fPIC"
 INC="-Iinclude -Isrc"
 DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
