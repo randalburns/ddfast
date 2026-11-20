@@ -1427,3 +1427,123 @@ table -1.3% / -2.5% / -2.3% (seeds 4242, 777, 31337); cycles per table -1.3% / -
 declarer of each strain starts with an empty table and costs about 54% of a table's nodes; an
 oracle first target there saves only about 4% of the total, and no bound across leaders or strains
 is provable (North-South on lead taking at least as many tricks fails in about 2 of 2,000 cases).
+
+## Round 17: sorting all four suits at no trumps; a 5-card pattern table again (branch patterns)
+
+Questions: the 3-card table and the 4-card pattern table sort the three side suits and leave
+lane 3 (the trump suit) in place. At no trumps lane 3 is an ordinary suit, so all four can be
+sorted. Does that help, and does it make a table for 5-card endings worth having?
+
+Two compile switches were added for the experiment and removed afterwards (see "Adopted"
+below). With both off the search was unchanged: 82,288,956 nodes on the public set with this
+machine's tables, the same as main.
+- `-DSORT4=1`: at no trumps the 3-card probe and the pattern-table key sort all four lanes
+  (six comparisons choose one of 24 byte shuffles; `g_shuf` now has 64 entries, `g_lrank` gives
+  each lane's place). The 3-card file is unchanged: the no-trump probe now reads only the 34
+  configurations with the lengths in descending order, of the 102 stored.
+- `-DP_LEVELS_N=2` with `DDFAST_TABLE_LEVELS=2`: a second pattern table for 5 cards a hand
+  (`p5_v5`, at most 64 patterns per run, `DDFAST_TABLE_CAP5`), filled from the same 6-card
+  endings.
+
+Both switches must reach every source file, so they go in `CXX` (`CXX="clang++ -DSORT4=1"`):
+`tables.cpp` is compiled without `XFLAGS`.
+
+Measured on an Apple M5 (Highway build), public set split into its 141 no-trump and 459 suit
+deals. Two sets of tables were filled to the same 48.2M six-card endings, one unsorted and
+one with SORT4. Other jobs were loading the machine throughout (load average 12-20), so the
+cycle counts are rough; node counts do not depend on load. All answers correct in every run.
+
+Suit-length configurations (side suits sorted, then all four sorted) and complete-table sizes:
+
+| cards a hand | arrangements | unsorted | side suits sorted | all four sorted |
+|---|---:|---:|---:|---:|
+| 2 | 2,520 | 165 | 41 | 15 |
+| 3 | 369,600 | 455 | 102 | 34 |
+| 4 | 63,063,000 | 929 | 193 | 60 |
+| 5 | 11,732,745,024 | 1,435 | 285 | 85 |
+
+A complete table is out of reach beyond 3 cards whatever the sorting: 4 cards is 63M x (193
++ 60) = 16 billion endings (16 GB at one byte each, without the deciding cards that the
+search needs), 5 cards 4.3 x 10^12. So "a table for 5 cards" can only mean patterns.
+
+Table sizes after the fill (unsorted -> SORT4): 4-card 501,843 runs, 688 MB -> 315,568 runs,
+483 MB (-30%); 5-card 2.78M runs, 1,348 MB -> 1.86M runs, 1,058 MB (-21%). The 3-card file
+would shrink from 377 MB to 251 MB if the 68 unused no-trump configurations were dropped (not
+done).
+
+Nodes and pattern-table hits (STATS builds):
+
+| deals | tables | 4-card hits | 5-card hits | nodes | vs first row |
+|---|---|---|---|---:|---:|
+| no trumps (141) | unsorted, 4-card only | 65.8% | | 17,242,805 | |
+| | SORT4, 4-card only | 79.2% | | 16,832,708 | -2.4% |
+| | unsorted, + 5-card | 65.4% | 4.5% | 17,067,182 | -1.0% |
+| | SORT4, + 5-card | 78.6% | 8.7% | 16,500,090 | -4.3% |
+| suits (459) | unsorted, 4-card only | 85.8% | | 66,286,986 | |
+| | SORT4, 4-card only | 85.8% | | 66,287,482 | 0.0% |
+| | unsorted, + 5-card | 84.9% | 15.8% | 64,778,445 | -2.3% |
+| all (600) | unsorted, 4-card only | 81.1% | | 83,421,397 | |
+| | SORT4, 4-card only | 84.2% | | 83,005,947 | -0.5% |
+| | unsorted, + 5-card | 80.1% | 13.3% | 81,705,418 | -2.1% |
+| | SORT4, + 5-card | 83.4% | 14.3% | 81,149,919 | -2.7% |
+
+Cost (plain builds, alternating runs, instructions per deal steady to about 1%):
+- SORT4, no-trump deals: 46.3-47.9M -> 45.1-45.3M instructions (-2.6% min to min); cycles
+  15.8-20.0M -> 15.1-16.7M (min -4%). Suit deals as a control: instructions equal (55.5-56.0M
+  against 55.3-55.9M), cycles 15.3-18.4M against 14.8-18.4M, so the noise is about 3%. Over
+  the whole set that is under 1%.
+- 5-card table, all deals: instructions 53.4-54.1M -> 56.4-57.5M (+6%); cycles 18.3-19.1M ->
+  21.7-23.5M (+15 to +25%), and the same with SORT4 (21.2-22.5M).
+
+Findings:
+- **Sorting all four suits at no trumps is a real but small gain**: the no-trump half of the
+  4-card table needs a quarter of the runs, its hit rate on full deals goes from 66% to 79%,
+  and no-trump deals take 2.4% fewer nodes and about 3% fewer instructions. No-trump problems
+  are a fifth of a full table. The 4-card table was 20 points worse at no trumps than in suits;
+  sorting closes two thirds of that gap.
+- **It does not make a 5-card table worth having.** Sorting doubles the 5-card hit rate at no
+  trumps (4.5% -> 8.7%) and does nothing for suits (15.8%); 86% of 5-card probes still miss.
+  About 2,350 probes per deal save about 2,900 nodes per deal (2%) and cost about 3.5M
+  instructions per deal, some 1,500 per probe: a miss scans a whole run. The same result as
+  rounds 3 and 5 on Zen 5 (-6% nodes, +4% cycles there, with a table filled from 75M endings).
+- **Why the hit rate is low.** The table is filled from random 6-card endings, where the same
+  table answered 49% of the 5-card questions (on Zen 5, TABLES_NOTES); in a full-deal search the 5-card positions that
+  reach the probe are the ones the per-deal table and the bounds have not already answered.
+- An unsorted table is still exact under the SORT4 probe (an entry is true for every relabelling
+  of the suits at no trumps), it just holds fewer of the keys asked for. Checked: `test_ddfast
+  quick` passes with the SORT4 build on the unsorted tables.
+
+Exactness, SORT4 build on its own tables, with and without the 5-card level: `test_ddfast
+quick` all exact; `test_play 300 7` all agree with DDS; `bench_solve random 2000 4242` all
+correct.
+
+### Adopted: all four suits sorted at no trumps in the 4-card table (`p4_v6`)
+
+The sort is now unconditional for the 4-card pattern table, and the file version is v6 so that
+existing tables are rebuilt on first use. The 3-card probe is as before: the gain measured
+above was in the 4-card table's hits, and the 3-card file would need a new layout to get
+smaller. The 5-card level and both switches are removed again: `P_LEVELS` is 1.
+
+Measured again on a quiet machine (Apple M5), each build on its own table filled with the
+default settings (about 190M six-card endings in 170 s), five alternating runs, against main:
+
+| deals | 4-card hits | nodes | instructions per deal | cycles per deal |
+|---|---|---|---|---|
+| no trumps (141) | 79.2% -> 84.9% | 16,829,253 -> 16,630,597 (-1.2%) | 44.86M -> 44.34M (-1.2%) | 12.76-12.98M -> 12.51-12.61M (-2.0% min, -2.5% median) |
+| suits (459) | 89.6% -> 89.8% | 65,562,250 -> 65,545,595 | 54.44M -> 54.42M | 14.57-14.61M -> 14.56-14.62M |
+| all (600) | 87.1% -> 88.6% | 82,288,956 -> 82,061,772 (-0.3%) | 52.12M -> 51.98M | 14.16-14.21M -> 14.05-14.14M (-0.5%) |
+
+The pattern file is 540 MB against 836 MB (-35%), 315,756 runs. With a table filled this far
+the unsorted one already answered 79% at no trumps, so the gain in nodes is half of what the
+short fill above showed; the saving in size is the larger effect.
+
+Exactness of the adopted code, on a table built from nothing: `test_ddfast quick`, `random
+3000 20261120` (solve, solve_parallel, solve_deal_parallel) and `tables 100 77` all exact;
+`test_play 1000 1` all agree with DDS; `-DSELFTEST=10 -DSELFTEST_MAX=11` 561,130 checks on the
+public set, no failure; `-DVERIFY_ORDER -DVERIFY_BOUNDS` on the public set, no abort; 20,000
+random positions each of 4, 5, 6 and 8 cards a hand all correct against DDS.
+
+Not done: the same sort in the 3-card table (its no-trump half would shrink from 102 to 34
+configurations, 377 MB to 251 MB, with a new file layout); a 5-card table filled from deeper
+endings or probed only where a hit is likely; canonical order among suits of equal length in
+the 3-card table.

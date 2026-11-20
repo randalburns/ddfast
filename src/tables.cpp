@@ -858,14 +858,16 @@ void build_t3_tables() {
   for (int m = 0; m < 4096; m++) g_r924[m] = popc(m) == 6 ? uint16_t(c++) : 0xFFFF;
   c = 0;
   for (int m = 0; m < 64; m++) g_r20[m] = popc(m) == 3 ? uint8_t(c++) : 0xFF;
-  for (int pid = 0; pid < 8; pid++) {
+  for (int pid = 0; pid < 64; pid++) {
     const int c01 = pid & 1, c02 = pid >> 1 & 1, c12 = pid >> 2 & 1;
-    int rank[4] = {c01 + c02, !c01 + c12, !c02 + !c12, 3};
+    const int c03 = pid >> 3 & 1, c13 = pid >> 4 & 1, c23 = pid >> 5 & 1;
+    int rank[4] = {c01 + c02 + c03, !c01 + c12 + c13, !c02 + !c12 + c23, !c03 + !c13 + !c23};
     memset(g_shuf[pid], 0x80, 16);
     memset(g_unshuf[pid], 0x80, 16);
-    bool ok = rank[0] != rank[1] && rank[0] != rank[2] && rank[1] != rank[2];
+    bool ok = ((1 << rank[0]) | (1 << rank[1]) | (1 << rank[2]) | (1 << rank[3])) == 15;
     for (int i = 0; i < 4; i++) {
       int r = ok ? rank[i] : i;  // output lane r <- input lane i
+      g_lrank[pid][i] = uint8_t(r);
       g_shuf[pid][2 * r] = uint8_t(2 * i), g_shuf[pid][2 * r + 1] = uint8_t(2 * i + 1);
       g_unshuf[pid][2 * i] = uint8_t(2 * r), g_unshuf[pid][2 * i + 1] = uint8_t(2 * r + 1);
     }
@@ -1258,7 +1260,7 @@ void random_position(Rng& rng, int cards, ddcore::Position& p) {
   p.leader = uint8_t(rng.next() % 4);
 }
 
-// The pattern tables live in files under the table directory: : p<cards>_v5.ent holds the runs (in
+// The pattern tables live in files under the table directory: : p<cards>_v6.ent holds the runs (in
 // key order), .idx the list of runs (key, offset, size), and while filling .cnt holds a hit
 // count per entry. A merge streams the old file and the new patterns into a new file, so no
 // table is ever assembled in memory; the search uses the file memory-mapped.
@@ -1277,7 +1279,7 @@ void* alloc_huge(size_t bytes) {
   return p;
 }
 
-std::string p_path(int lv, const char* ext) { return table_dir() + "/p" + std::to_string(lv + 4) + "_v5." + ext; }
+std::string p_path(int lv, const char* ext) { return table_dir() + "/p" + std::to_string(lv + 4) + "_v6." + ext; }
 
 void* map_file(const std::string& path, size_t bytes, bool writable) {
   if (!bytes) return nullptr;
@@ -1438,7 +1440,7 @@ bool p_merge(int lv, std::vector<PRec>& recs, size_t cap, bool keep_counts) {
   return true;
 }
 
-constexpr u64 P_MAGIC = 0x3576415034504F31ull;
+constexpr u64 P_MAGIC = 0x3676415034504F31ull;  // v6: all four suits sorted at no trumps
 
 bool p_load(int lv) {
   FILE* f = fopen(p_path(lv, "idx").c_str(), "rb");
@@ -1591,6 +1593,7 @@ void snapshot(Snapshot& out) {
   memcpy(out.r924, g_r924, sizeof g_r924), memcpy(out.r20, g_r20, sizeof g_r20), memcpy(out.cfg3, g_cfg3, sizeof g_cfg3);
   out.t3 = g_t3;
   memcpy(out.shuf, g_shuf, sizeof g_shuf), memcpy(out.unshuf, g_unshuf, sizeof g_unshuf);
+  memcpy(out.lrank, g_lrank, sizeof g_lrank);
   for (int i = 0; i < P_LEVELS; i++) out.pt[i] = g_pt[i];
 }
 

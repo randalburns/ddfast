@@ -7,7 +7,7 @@ written against dds3::
 
     import ddfast.dds3 as dds3
 
-The endgame tables (about 1.2 GB) are loaded on first use from ``$DDFAST_TABLES`` (or
+The endgame tables (about 1 GB) are loaded on first use from ``$DDFAST_TABLES`` (or
 ``build/tables`` under the current directory), and built there first if missing; call
 ``ddfast.init(path)`` to choose the directory. Each process reads its own copy; when many
 processes run on one machine, ``ddfast.init(map_tables=True)`` (or ``DDFAST_TABLE_MAP=1`` in

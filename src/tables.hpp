@@ -83,13 +83,15 @@ using bits::u64;
 // order) that matter for that answer. The file t3_v2.bin (377 MB).
 constexpr size_t T3_ARR = 369600, T3_CFG = 102, T3_BYTES = T3_CFG * 2 * T3_ARR * 5;
 
-// The pattern table for endings of 4 cards a hand (level 0; level = cards - 4), with the side suits
-// sorted. A directory maps the suit lengths of all four hands (and the strain) to a run of
+// The pattern table for endings of 4 cards a hand (level 0; level = cards - 4), with the suits
+// sorted: the three side suits in a trump contract (the trump lane stays last), all four at no
+// trumps, where lane 3 is a suit like the others. A directory maps the suit lengths of all
+// four hands (and the strain) to a run of
 // groups of 8 entries. An entry is a pattern and bounds: a = the owners of the cards that
 // matter (two bits per card, split in two bit strings in compressed order), b = those cards
 // (the same mask under both bit strings), bits 56-58 and 59-61 bounds on the leader's side's
 // tricks, bit 63 set. An unused slot has a = ~0, b = 0. A run stores its a's and then its b's
-// (64 bytes per group each). Files p4_v5.{idx,ent}. The table is filled by
+// (64 bytes per group each). Files p4_v6.{idx,ent}. The table is filled by
 // solving random six-card endings, then frozen.
 constexpr int P_LEVELS = 1;
 constexpr int P_CHUNK = 8;  // groups prefetched at a time
@@ -120,7 +122,8 @@ struct Snapshot {
   uint16_t r924[4096];
   uint8_t r20[64], cfg3[2197];
   uint8_t* t3;
-  alignas(16) uint8_t shuf[8][16], unshuf[8][16];
+  alignas(16) uint8_t shuf[64][16], unshuf[64][16];
+  uint8_t lrank[64][4];
   PTable pt[P_LEVELS];
 };
 
@@ -158,8 +161,13 @@ namespace {
 [[maybe_unused]] uint8_t g_r20[64], g_cfg3[2197];
 [[maybe_unused]] uint8_t* g_t3;
 // Byte shuffles that sort lanes 0-2 by length (index: the three length comparisons), and back.
-[[maybe_unused]] alignas(16) uint8_t g_shuf[8][16];
-[[maybe_unused]] alignas(16) uint8_t g_unshuf[8][16];
+// Lane orders: pid has a bit for each pair of lanes, set when the first sorts after the second
+// (bits 0-2: lanes 0-1, 0-2, 1-2; bits 3-5: lanes 0-3, 1-3, 2-3, zero when lane 3 stays last:
+// the 3-card table always, the pattern table in trump contracts).
+// g_lrank[pid][i] is the place lane i moves to.
+[[maybe_unused]] alignas(16) uint8_t g_shuf[64][16];
+[[maybe_unused]] alignas(16) uint8_t g_unshuf[64][16];
+[[maybe_unused]] uint8_t g_lrank[64][4];
 [[maybe_unused]] PTable g_pt[P_LEVELS];
 
 // This file's copy of the table state <- the tables loaded by init_tables().
@@ -173,6 +181,7 @@ namespace {
   memcpy(g_r924, s.r924, sizeof g_r924), memcpy(g_r20, s.r20, sizeof g_r20), memcpy(g_cfg3, s.cfg3, sizeof g_cfg3);
   g_t3 = s.t3;
   memcpy(g_shuf, s.shuf, sizeof g_shuf), memcpy(g_unshuf, s.unshuf, sizeof g_unshuf);
+  memcpy(g_lrank, s.lrank, sizeof g_lrank);
   for (int i = 0; i < P_LEVELS; i++) g_pt[i] = s.pt[i];
 }
 
@@ -246,7 +255,13 @@ inline int probe_pattern(const u64* H, u64 lens, int n, int L, u64 all, int targ
   const u64 t2 = ddport::lane_nibbles(rot, 2), t3 = ddport::lane_nibbles(rot, 3);
   const int c01 = t0 < t1, c02 = t0 < t2, c12 = t1 < t2;
   q.pid = c01 | c02 << 1 | c12 << 2;
-  q.key = t0 << (16 * (c01 + c02)) | t1 << (16 * (!c01 + c12)) | t2 << (16 * (!c02 + !c12)) | t3 << 48 | u64(NT) << 63;
+  if (NT) {  // no trump lane: all four suits take part in the order
+    q.pid |= (t0 < t3) << 3 | (t1 < t3) << 4 | (t2 < t3) << 5;
+    const uint8_t* rk = g_lrank[q.pid];
+    q.key = t0 << (16 * rk[0]) | t1 << (16 * rk[1]) | t2 << (16 * rk[2]) | t3 << (16 * rk[3]) | u64(NT) << 63;
+  } else {
+    q.key = t0 << (16 * (c01 + c02)) | t1 << (16 * (!c01 + c12)) | t2 << (16 * (!c02 + !c12)) | t3 << 48 | u64(NT) << 63;
+  }
   size_t h = (q.key * 0x9E3779B97F4A7C15ull) >> (64 - pt.dir_bits);
   ddport::prefetch(&pt.dir[h]);
   pause();
