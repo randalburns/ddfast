@@ -131,7 +131,7 @@ NB_MODULE(_ddfast, m) {
         ddfast_compat::ensure_init(dir.empty() ? nullptr : dir.c_str(), map_tables);
       },
       "table_dir"_a = nb::none(), "map_tables"_a = false,
-      "Load the endgame tables (about 1.2 GB) from table_dir, else $DDFAST_TABLES, else build/tables "
+      "Load the endgame tables (about 1 GB) from table_dir, else $DDFAST_TABLES, else build/tables "
       "under the current directory, building them there first if missing (a few minutes, once). "
       "Called automatically by the first solve; call it yourself to choose the directory or the "
       "moment. map_tables=True (or DDFAST_TABLE_MAP=1 in the environment) maps the table files "
