@@ -85,6 +85,30 @@ runs):
 ddfast takes about as many cycles per deal on the M5 as on Zen 5; DDS takes far fewer, which is
 most of the smaller ratio.
 
+### Against bridge-solver
+
+[bridge-solver](https://github.com/BSalita/bridge-solver) (BSalita's fork of
+macroxue/bridge-solver, branch `faster-search`, commit `61a6e59`) is the solver BEN 0.9.0.4
+ships and solves on by default. `bench/bench_libdds.cpp` calls it through its DDS-compatible
+library, on the same machine and deals as above, both the copy BEN ships (built for
+x86-64-v3) and one built here (`-march=native`, profile-guided); `bench/get_bsolver.sh` fetches
+both. Every answer agreed with ddfast's. The ratios are bridge-solver's cost over ddfast's;
+first BEN's copy, then the native build:
+
+| | ddfast | bridge-solver (BEN's copy) | ratio (BEN's / native) | DDS ratio |
+|---|---|---|---|---|
+| full tables, one core (100 random deals, CalcDDtable; cycles per table) | 165M | 257M | 1.56x / 1.50x | 4.3x |
+| single problems, one core (public set, SolveBoard; cycles per deal) | 15.7M | 32.1M | 2.05x / 1.93x | |
+| table batches, 8 threads (500 random deals, CalcAllTables; thread-cycles per table) | 200M | 343-361M | 1.72-1.80x / 1.61-1.69x | |
+| BEN's workload, 8 threads (wall time, all batches) | | | 1.68x / 1.59x | 4.4-4.6x |
+
+BEN's workload (`bench_libdds ... boards`): ten positions at each of four stages of play
+(trick 1, 4, 7 and 10), each a batch of 200 samples with the two hidden hands re-dealt, solved
+with `solutions` 1 and 3 through SolveAllBoards as BEN's `bsolver.py` calls it, against
+ddfast's DDS-compatible SolveBoard (the code behind the Python module's `solve_boards_pbn`) on
+as many threads. bridge-solver's cost is 1.6x ddfast's at trick 1, 1.5-2.2x at trick 4 and 2-3x
+at tricks 7 and 10.
+
 ## Requirements
 
 - Linux on x86-64: the build uses `-march=native`. CPUs with AVX-512 (the Ice Lake set: Zen
@@ -350,6 +374,9 @@ bin/bench_tables 200 4242                                  # tables against DDS 
 taskset -c 0-3 bin/bench_batch tests/data/public.set 120 4 0-3   # batches vs SolveAllBoards / CalcAllTables
 bin/test_play 1000 1             # play positions, card results, play analysis and par against DDS
 taskset -c 0 bin/bench_positions 6 20000 21 x.bin dds      # positions of 6 cards a hand vs DDS
+sh bench/get_bsolver.sh                                    # bridge-solver: built here, and BEN's copy
+taskset -c 0 bin/bench_libdds build/ben-bsolver/libbsolver-dds.so tables 100   # vs ddfast and DDS, one core
+taskset -c 0-3,12-15 bin/bench_libdds build/ben-bsolver/libbsolver-dds.so boards 200 8 0-3,12-15  # BEN's workload
 sh bench/loo.sh OUTDIR                                     # the leave-one-out study (docs/LOO.md)
 ```
 

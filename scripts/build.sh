@@ -7,6 +7,8 @@
 #   bin/bench_solve      single-thread and parallel benchmark (bench/bench_solve.cpp)
 #   bin/bench_tables     full-table benchmark against DDS CalcDDtable (bench/bench_tables.cpp)
 #   bin/bench_batch      batches against DDS SolveAllBoards / CalcAllTables (bench/bench_batch.cpp)
+#   bin/bench_libdds     another solver behind DDS's C API (a libdds.so, e.g. bridge-solver's)
+#                        against ddfast and DDS (bench/bench_libdds.cpp, bench/get_bsolver.sh)
 #   bin/libdds.a         DDS (extern/dds), for the tests and benchmarks only
 #
 # Builds for the build machine's CPU (-march=native / -mcpu=native; ARCH to choose another).
@@ -92,7 +94,7 @@ rm -f "$OUT/libdds.a"
 ar rcs "$OUT/libdds.a" "$OUT"/dds/*.o
 
 # Tests and benchmarks.
-for b in test_ddfast test_play make_ref bench_solve bench_tables bench_batch bench_positions; do rm -f "$OUT/$b"; done
+for b in test_ddfast test_play make_ref bench_solve bench_tables bench_batch bench_positions bench_libdds; do rm -f "$OUT/$b"; done
 # shellcheck disable=SC2086
 {
   $CXX $BASE $INC $DDSINC -Itests tests/test_ddfast.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/test_ddfast" &
@@ -102,7 +104,8 @@ for b in test_ddfast test_play make_ref bench_solve bench_tables bench_batch ben
   $CXX $BASE $INC $DDSINC -Itests bench/bench_tables.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_tables" &
   $CXX $BASE $INC $DDSINC -Itests bench/bench_batch.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_batch" &
   $CXX $BASE $INC $DDSINC bench/bench_positions.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -o "$OUT/bench_positions" &
+  $CXX $BASE $INC $DDSINC -Itests -Ipython/src bench/bench_libdds.cpp python/src/dds_compat.cpp "$OUT/libddfast.a" "$OUT/libdds.a" -pthread -ldl -o "$OUT/bench_libdds" &
   wait
 }
-for b in test_ddfast test_play make_ref bench_solve bench_tables bench_batch bench_positions; do [ -x "$OUT/$b" ] || { echo "build.sh: $b failed" >&2; exit 1; }; done
+for b in test_ddfast test_play make_ref bench_solve bench_tables bench_batch bench_positions bench_libdds; do [ -x "$OUT/$b" ] || { echo "build.sh: $b failed" >&2; exit 1; }; done
 echo "build.sh: done"
