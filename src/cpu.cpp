@@ -15,9 +15,12 @@
 #endif
 
 namespace ddport {
-// Compiled for the baseline x86-64, so that it runs on any x86-64 CPU.
+// Compiled for the baseline x86-64, so that it runs on any x86-64 CPU. The sets are also turned
+// off by name: clang keeps a set given as its own flag (-mavx512f) through arch=, and would
+// then clear cpu_check's buffers with AVX-512 stores.
 #if DDPORT_X86
-#define DDPORT_BASELINE __attribute__((target("arch=x86-64")))
+#define DDPORT_BASELINE \
+  __attribute__((target("arch=x86-64,no-sse3,no-avx,no-popcnt,no-lzcnt,no-bmi,no-bmi2,no-movbe")))
 #else
 #define DDPORT_BASELINE
 #endif
