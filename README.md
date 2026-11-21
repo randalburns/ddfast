@@ -93,7 +93,7 @@ most of the smaller ratio.
 - Or macOS on Apple silicon (M1 and later), with the Xcode Command Line Tools: the build uses
   `-mcpu=native`. See "Code paths and the macOS port" below.
 - A C++20 compiler: clang++ (preferred) or g++. No cmake or other build system.
-- About 1.2 GB of memory for the tables, and 1.1 GB of disk for their files.
+- About 1 GB of memory for the tables, and as much disk for their files.
 
 ## Building
 
@@ -138,7 +138,8 @@ too (from `proc_pid_rusage`); they are steadier than the time when other program
 ### The tables
 
 ddfast needs two table files: the 3-card table (`t3_v2.bin`, 377 MB) and the
-4-card pattern table (`p4_v5.ent` and `.idx`, 758 MB). `init()` reads them from the directory
+4-card pattern table (`p4_v6.ent` and `.idx`, about 550 MB; it is filled for a fixed time, so
+the size varies a little with the machine). `init()` reads them from the directory
 it is given, else `$DDFAST_TABLES`, else `build/tables` under the current directory, and if
 they are missing builds them there first (once): about 10 seconds for the 3-card table (on 8 cores) and up
 to 170 seconds for the pattern table, on all cores, using up to about 5 GB of memory. So
@@ -153,7 +154,7 @@ echo 'N:AKQ2.J93.T84.Q76 J96.A84.AQ752.T3 T8754.KT.K9.K942 3.Q7652.J63.AJ85' | b
 The 2-card table is not a file: it is built in memory by every `init()`, in a moment.
 
 **Many processes on one machine.** By default each process reads the two files into its own
-memory, 1.1 GB each. To share one copy between all processes that use the same files, map
+memory, about 1 GB each. To share one copy between all processes that use the same files, map
 them instead: `ddfast::init(dir, true)` in C++, `ddfast.init(map_tables=True)` in Python, or
 `DDFAST_TABLE_MAP=1` in the environment (which needs no change to the program). A process then
 keeps about 60 MB of its own and starts without copying the tables. Mapped tables search as
