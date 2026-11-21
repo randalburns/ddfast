@@ -22,6 +22,23 @@ guess, and the last 2, 3 and 4 cards of each hand are looked up in precomputed e
 (`src/tables.cpp`). [docs/NOTES.md](docs/NOTES.md) is the design and the full measurement
 history.
 
+Two techniques come from [bridge-solver](https://github.com/macroxue/bridge-solver), Hanhong
+Xue's double-dummy solver:
+- **Cut-off cards:** a small table of the card that last caused a cutoff, keyed by the hand
+  and what the trick holds (at a lead, the leader's hand, partner's suit-length parities and
+  the target; following, the led suit's cards and the card winning so far), tried first.
+  bridge-solver's cut-off cache, by Hanhong Xue.
+- **More sure-trick bounds at each trick start**, after DDS's, their proofs stored in the
+  transposition table as DDS's bounds are. Slow trump tricks (Kx behind the ace, KQ against
+  it, Qxx behind AK and the like), trump length and the other side's top trumps and slow
+  no-trump tricks are Hanhong Xue's; trump tricks guaranteed by rank, drawing trumps then
+  cashing winners, and at no trumps "the leading side cannot take every trick" (too short in
+  the suits it tops, or held up by stoppers) are Robert Salita's, from his fork's
+  `faster-search` branch ([BSalita/bridge-solver](https://github.com/BSalita/bridge-solver)),
+  since merged into bridge-solver.
+
+Together they take 24% fewer nodes and about 13% fewer cycles (NOTES, round 18).
+
 ## Design explainers
 
 Illustrated explainers of the techniques behind the speed, for programmers who know C++ and
@@ -380,4 +397,6 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 Apache License 2.0 (see LICENSE), as is DDS. `src/dds_port.hpp` contains code taken
 from DDS (Copyright 2006-2014 Bo Haglund, 2014-2018 Bo Haglund and Soren Hein), marked in the
 file; the Python module compiles in DDS's `pbn.cpp`, `par.cpp`, `dealer_par.cpp` and
-`utility/constants.cpp` from the submodule.
+`utility/constants.cpp` from the submodule. `src/solver.cpp` adapts sure-trick rules and the
+cut-off card keys of bridge-solver (Copyright 2013-2026 Hanhong Xue; three of the rules by
+Robert Salita; MIT or Apache-2.0), credited where they are used.
