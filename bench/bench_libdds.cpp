@@ -30,12 +30,15 @@
 // Run the one-thread modes pinned (taskset -c 0). NO_DDS=1 leaves DDS out of `tables` and
 // `boards`.
 //
-// LIB is loaded with its own symbol scope (RTLD_LOCAL | RTLD_DEEPBIND), so its DDS functions do
-// not collide with the DDS linked in here. Its structs are DDS 2.9's (as ddss and bridge-solver
+// LIB is loaded with its own symbol scope (RTLD_LOCAL | RTLD_DEEPBIND; on macOS a library's own
+// symbols already come first, so RTLD_LOCAL alone), so its DDS functions do not collide with the
+// DDS linked in here. Its structs are DDS 2.9's (as ddss and bridge-solver
 // declare them), declared below. Times are wall clock; cycles are user-mode cycles summed over
 // every thread of the process (counters opened on each thread after a warm-up call has started
 // the library's thread pool), so work on another library's pool threads is counted, as is
-// ddfast's on the calling thread or its workers.
+// ddfast's on the calling thread or its workers. On macOS the cycles are the process's, user and
+// system (proc_pid_rusage), and the process is not confined to the CPU list (macOS has no CPU
+// affinity).
 #include <dirent.h>
 #include <dlfcn.h>
 #include <sched.h>
@@ -44,6 +47,10 @@
 
 #include "common.hpp"
 #include "dds_compat.hpp"
+
+#ifndef RTLD_DEEPBIND
+#define RTLD_DEEPBIND 0
+#endif
 
 using namespace testing;
 
@@ -136,6 +143,14 @@ void to_table(const ddTableResults& r, ddfast::Table& t) {
 
 namespace {
 // User-mode cycles summed over every thread of the process that exists when open() is called.
+// (macOS: the whole process's, user and system, from common.hpp's perf_read.)
+#if !defined(__linux__)
+struct ProcessCycles {
+  void open() {}
+  long long read() const { return perf_read(PERF_COUNT_HW_CPU_CYCLES); }
+  void close() {}
+};
+#else
 struct ProcessCycles {
   std::vector<int> fds;
   void open() {
@@ -144,7 +159,6 @@ struct ProcessCycles {
     if (!d) return;
     while (dirent* e = readdir(d)) {
       if (e->d_name[0] == '.') continue;
-#if defined(__linux__)
       perf_event_attr a{};
       a.type = PERF_TYPE_HARDWARE;
       a.size = sizeof a;
@@ -153,7 +167,6 @@ struct ProcessCycles {
       a.exclude_hv = 1;
       const int fd = int(syscall(SYS_perf_event_open, &a, atoi(e->d_name), -1, -1, 0));
       if (fd >= 0) fds.push_back(fd);
-#endif
     }
     closedir(d);
   }
@@ -171,6 +184,19 @@ struct ProcessCycles {
     fds.clear();
   }
 };
+#endif
+
+// Confines the process (and the threads it starts later) to these CPUs; nothing off Linux.
+void confine(const std::vector<int>& cpus) {
+#if defined(__linux__)
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  for (int c : cpus) CPU_SET(c, &set);
+  sched_setaffinity(0, sizeof set, &set);
+#else
+  (void)cpus;
+#endif
+}
 
 // Times f() (wall seconds) and counts the process's cycles over it.
 template <class F>
@@ -275,10 +301,7 @@ int batch(size_t n, unsigned long long seed, std::vector<int> cpus) {
   std::vector<ddfast::Table> fast(n), other(n);
   double secs, cycles, fast_cycles;
   // The library's pool threads inherit the process's CPUs: confine it to the list first.
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  for (int c : cpus) CPU_SET(c, &set);
-  sched_setaffinity(0, sizeof set, &set);
+  confine(cpus);
   init_or_exit();
   ddfast::solve_tables_parallel(deals.data(), n < 16 ? n : 16, fast.data(), cpus.data(), int(cpus.size()));  // warm-up
   timed([&] { ddfast::solve_tables_parallel(deals.data(), n, fast.data(), cpus.data(), int(cpus.size())); }, secs,
@@ -419,10 +442,7 @@ int boards(size_t n, int threads, std::vector<int> cpus, unsigned long long seed
   if (cpus.empty()) cpus = ddfast::available_cpus();
   if (threads <= 0) threads = int(cpus.size());
   const bool with_dds = !getenv("NO_DDS") || !*getenv("NO_DDS") || !strcmp(getenv("NO_DDS"), "0");
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  for (int c : cpus) CPU_SET(c, &set);
-  sched_setaffinity(0, sizeof set, &set);
+  confine(cpus);
   ddfast_compat::ensure_init();
   lib::SetMaxThreads(threads);
   SetMaxThreads(threads);
