@@ -72,13 +72,13 @@ unsigned long long g_plook[P_LEVELS], g_phit[P_LEVELS], g_etc[2][16], g_etch[2][
 int g_rootL;
 unsigned long long g_cnS[2][16], g_c1S[2][16], g_wS[2][16], g_allS[2][16], g_allN[2][16];
 namespace {
-u64 g_cat[4][8][8], g_catw[4][8][8], g_fw[4][16], g_fwn[4][16], g_ff[4][16], g_blk[16], g_blkhit[16], g_tmiss[16], g_tnoslot[16], g_evict[16], g_store[16], g_n[16][5], g_fn[16], g_nodes, g_leads, g_queries, g_tthit, g_qt, g_lt, g_ttlook, g_first[4], g_tried[4], g_hx[2][2], g_cs[16], g_cs1[16], g_wmax[16], g_c1[16], g_cn[16], g_w[16], g_feat[2][16], g_wfeat[2][16];
+u64 g_cat[4][8][8], g_catw[4][8][8], g_fw[4][16], g_fwn[4][16], g_ff[4][16], g_blk[16], g_blkhit[16], g_tmiss[16], g_tnoslot[16], g_evict[16], g_store[16], g_n[16][5], g_fn[16], g_nodes, g_leads, g_queries, g_tthit, g_qt, g_lt, g_bsb, g_ttlook, g_first[4], g_tried[4], g_hx[2][2], g_cs[16], g_cs1[16], g_wmax[16], g_c1[16], g_cn[16], g_w[16], g_feat[2][16], g_wfeat[2][16];
 struct StatPrinter {
   ~StatPrinter() {
-    fprintf(stderr, "queries %llu nodes %llu (%.1f/query) leads %llu qt %llu lt %llu ttlook %llu tthit %llu\n",
+    fprintf(stderr, "queries %llu nodes %llu (%.1f/query) leads %llu qt %llu lt %llu ttlook %llu tthit %llu bsb %llu\n",
             (unsigned long long)g_queries, (unsigned long long)g_nodes, double(g_nodes) / double(g_queries),
             (unsigned long long)g_leads, (unsigned long long)g_qt, (unsigned long long)g_lt,
-            (unsigned long long)g_ttlook, (unsigned long long)g_tthit);
+            (unsigned long long)g_ttlook, (unsigned long long)g_tthit, (unsigned long long)g_bsb);
     for (int i = 0; i < P_LEVELS; i++) fprintf(stderr, "p%d: look %llu hit %llu\n", i + 4, g_plook[i], g_phit[i]);
     for (int n = 4; n < 14; n++) fprintf(stderr, "  n=%d: new entries %llu, blocks scanned %llu, blocks on hits %llu, misses %llu (no bound decides %llu, no slot %llu)\n", n, (unsigned long long)g_store[n], (unsigned long long)g_blk[n], (unsigned long long)g_blkhit[n], (unsigned long long)g_tmiss[n], (unsigned long long)g_evict[n], (unsigned long long)g_tnoslot[n]);
     for (int n = 1; n < 14; n++)
@@ -1053,6 +1053,300 @@ inline bool dds_bounds(int n, int L, int target, u64 all, bool& filled, u64& R, 
   }
   return false;
 #endif
+}
+
+// ---------------------------------------------------------------------------------------
+// More sure-trick bounds at the start of a trick, after DDS's: rules from bridge-solver
+// (github.com/macroxue/bridge-solver, MIT or Apache-2.0), solver.cc: Hanhong Xue's
+// SlowTrumpTricks, TrumpLengthTricks, TopTrumpTricks and OtherSlowNoTrumpTricks, and Robert
+// Salita's TrumpRankTricks, DrawTrumpsThenCash and CannotTakeAllNoTrump (from his fork's
+// faster-search branch, github.com/BSalita/bridge-solver, since merged into bridge-solver).
+// Each finds tricks one side surely takes and the cards its proof
+// relies on: always the top cards of a suit down to some card (R, as DDS's winning ranks),
+// together with the suit lengths and the leader, which the table key holds. Where
+// bridge-solver records only some of the winners of a suit, all of them are kept here.
+#ifndef BSB
+#define BSB 1
+#endif
+namespace bsb {
+inline u64 top_n(u64 set, int k) {  // the k highest cards of set (one lane)
+  u64 r = 0;
+  for (; k > 0 && set; k--) {
+    const u64 c = highest(set);
+    r |= c, set ^= c;
+  }
+  return r;
+}
+inline bool has(u64 set, u64 cards) { return (set & cards) == cards; }
+inline bool kx(u64 h, u64 c) { return (h & c) && popc(h) >= 2; }  // c with at least one other card
+
+// Slow trump tricks of the side holding my and pd (my on lead when `leading`): Kx behind the
+// ace, Kx against a singleton ace, KQJ or KQ against the ace, Qxx behind or against AK.
+struct Res { int tricks; u64 R; };
+inline Res slow_trump(u64 allT, u64 my, u64 pd, u64 lho, u64 rho, bool leading, int n) {
+  if (popc(allT) < 3) return {0, 0};
+  const u64 a = highest(allT), k = highest(allT & ~a);
+  if ((kx(pd, k) && (lho & a)) || (kx(my, k) && (rho & a) && (!leading || n >= 3))) return {1, a | k};
+  if ((kx(pd, k) || kx(my, k)) && (rho == a || lho == a) && (!leading || n >= 3)) return {1, a | k};
+  const u64 q = highest(allT & ~(a | k));
+  if (popc(allT) >= 4) {
+    const u64 j = highest(allT & ~(a | k | q));
+    if (((lho | rho) & a) && has(my | pd, k | q | j) && (popc(my) >= 3 || popc(pd) >= 3)) return {2, a | k | q | j};
+  }
+  if (((lho | rho) & a) && has(my | pd, k | q) && (popc(my) >= 2 || popc(pd) >= 2)) return {1, a | k | q};
+  if (popc(allT) >= 5)
+    if (((pd & q) && popc(pd) >= 3 && has(lho, a | k)) || ((my & q) && popc(my) >= 3 && has(rho, a | k) && (!leading || n >= 4)))
+      return {1, a | k | q};
+  if ((((pd & q) && popc(pd) >= 3) || ((my & q) && popc(my) >= 3)) &&
+      (lho == (a | k) || rho == (a | k) || (popc(lho) == 1 && popc(rho) == 1)) && (!leading || n >= 4))
+    return {1, a | k | q};
+  return {0, 0};
+}
+// Each trump of the longer hand wins a trick unless an opponent's trump is in it.
+inline int trump_length(u64 my, u64 pd, u64 lho, u64 rho) {
+  return std::max(popc(my), popc(pd)) - popc(lho) - popc(rho);
+}
+// The most trumps of `t` that higher trumps of `opp` can beat, each used once.
+inline int trump_kills(u64 t, u64 opp) {
+  int kills = 0;
+  while (t) {
+    const u64 low = lowest(t);
+    const u64 higher = opp & above(low);
+    if (!higher) break;
+    kills++;
+    t ^= low;
+    opp = higher ^ lowest(higher);
+  }
+  return kills;
+}
+// Sure trump tricks of one hand by rank, whoever leads; pins as few top trumps as give `wanted`.
+inline Res trump_rank(u64 allT, u64 t, u64 opp, int wanted) {
+  const int n = popc(t);
+  if (wanted <= 0 || n < wanted || n - trump_kills(t, opp) < wanted) return {0, 0};
+  u64 rest = t;
+  const int num_opp = popc(opp);
+  for (int i = 1; i <= n; i++) {
+    const u64 card = highest(rest);
+    rest ^= card;
+    const u64 pinned = allT & ge(card);
+    u64 pinned_opp = opp & pinned;
+    const int unpinned = n - i, unpinned_opp = num_opp - popc(pinned_opp);
+    int kills = std::min(unpinned, unpinned_opp);
+    for (int k = unpinned - kills; k > 0 && pinned_opp; k--) pinned_opp ^= lowest(pinned_opp), kills++;
+    kills += trump_kills(t & pinned, pinned_opp);
+    if (n - kills >= wanted) return {n - kills, pinned};
+  }
+  return {0, 0};
+}
+// The other side's top trumps, as many as its longer trump holding.
+inline Res top_trump(u64 allT, u64 my, u64 pd) {
+  if (my == allT) return {popc(my), 0};
+  if (pd == allT) return {popc(pd), 0};
+  const u64 both = my | pd;
+  const int maxlen = std::max(popc(my), popc(pd));
+  u64 R = 0, x = allT;
+  int sure = 0;
+  while (x && sure < maxlen) {
+    const u64 c = highest(x);
+    if (!(both & c)) break;
+    sure++, R |= c, x ^= c;
+  }
+  return {sure, R};
+}
+inline int suit_fast(u64 ms, int mw, int maxrw, bool& entry, u64 ps, int pw) {
+  if (ps && mw > 0 && highest(ms) > lowest(ps)) entry = true;
+  if (pw == 0) return mw >= maxrw ? popc(ms) : mw;
+  if (mw == 0) return ms ? pw : 0;
+  if (highest(ms) < lowest(ps)) return pw;
+  if (lowest(ms) > highest(ps)) return mw;
+  if (pw == popc(ps)) pw--;
+  return std::min(popc(ms), mw + pw);
+}
+// Fast tricks with no trumps in play, my on lead. R: every top card of a suit our side holds.
+inline Res fast_nt(u64 my, u64 pd, u64 lho, u64 rho) {
+  const u64 allc = my | pd | lho | rho;
+  u64 R = 0, pdR = 0;
+  int my_tricks = 0, pd_tricks = 0;
+  bool my_entry = false, pd_entry = false;
+  for (int s = 0; s < 4; s++) {
+    const u64 ms = my & LANE(s), ps = pd & LANE(s);
+    const int opp_max = std::max(popc(lho & LANE(s)), popc(rho & LANE(s)));
+    const int my_max = std::max(popc(ps), opp_max), pd_max = std::max(popc(ms), opp_max);
+    int mw = 0, pw = 0;
+    u64 x = allc & LANE(s);
+    while (x) {
+      const u64 c = highest(x);
+      x ^= c;
+      if (ms & c) mw++, R |= c;
+      else if (ps & c) pw++, pdR |= c;
+      else break;
+    }
+    my_tricks += suit_fast(ms, mw, my_max, my_entry, ps, pw);
+    pd_tricks += suit_fast(ps, pw, pd_max, pd_entry, ms, mw);
+  }
+  int fast = my_tricks;
+  if (pd_entry) fast = std::max(my_tricks, pd_tricks), R |= pdR;
+  return {std::min(fast, popc(my)), R};
+}
+// Draws the opponents' trumps in `rounds` rounds with the top trumps `run` (all ours), then
+// counts the fast tricks of the hand left on lead.
+inline Res draw_with_run(const u64* h4, int L, u64 run, int rounds, int n) {
+  constexpr u64 T = LANE(3);
+  u64 hand[2] = {h4[L], h4[L ^ 2]};
+  int disc[2] = {0, 0}, leader = 0;
+  for (int r = 0; r < rounds; r++) {
+    const int f = 1 - leader;
+    const u64 lt = hand[leader] & T, ft = hand[f] & T;
+    if (!lt) return {0, 0};
+    if (!ft) disc[f]++;
+    if (const u64 lr = lt & run) {
+      const u64 lc = lowest(lr);
+      hand[leader] ^= lc;
+      if (ft) {
+        const u64 fc = lowest(ft);
+        hand[f] ^= fc;
+        if (fc > lc) leader = f;
+      }
+    } else {
+      const u64 fr = ft & run;
+      if (!fr) return {0, 0};
+      hand[leader] ^= lowest(lt);
+      hand[f] ^= lowest(fr);
+      leader = f;
+    }
+  }
+  for (int x = 0; x < 2; x++)
+    for (; disc[x] > 0; disc[x]--) {
+      int longest = -1, length = 0;
+      for (int s = 0; s < 3; s++)
+        if (popc(hand[x] & LANE(s)) > length) length = popc(hand[x] & LANE(s)), longest = s;
+      if (longest < 0) return {0, 0};
+      hand[x] ^= lowest(hand[x] & LANE(longest));
+    }
+  const Res f = fast_nt(hand[leader], hand[1 - leader], h4[(L + 1) & 3] & ~T, h4[(L + 3) & 3] & ~T);
+  return {std::min(rounds + f.tricks, n), f.R | run};
+}
+inline Res draw_then_cash(const u64* h4, int L, u64 allT, int n) {
+  constexpr u64 T = LANE(3);
+  const int rounds = std::max(popc(h4[(L + 1) & 3] & T), popc(h4[(L + 3) & 3] & T));
+  if (rounds == 0) return {0, 0};
+  const u64 ours = (h4[L] | h4[L ^ 2]) & T;
+  const u64 run = top_n(allT, rounds);
+  if (run & ~ours) return {0, 0};
+  const Res r = draw_with_run(h4, L, run, rounds, n);
+  if (r.tricks > 0) return r;
+  u64 long_run = 0, x = allT;
+  for (int count = 0; x && count < 2 * rounds; count++) {
+    const u64 c = highest(x);
+    if (!(ours & c)) break;
+    long_run |= c, x ^= c;
+  }
+  if (long_run == run) return {0, 0};
+  return draw_with_run(h4, L, long_run, rounds, n);
+}
+// No trumps in play: the other side holds the top card of every suit the leader holds.
+inline Res other_slow_nt(const u64* h4, int L, u64 all) {
+  const u64 my = h4[L], ours = my | h4[L ^ 2];
+  u64 R = 0;
+  for (int s = 0; s < 4; s++) {
+    if (!(my & LANE(s))) continue;
+    const u64 top = highest(all & LANE(s));
+    if (ours & top) return {0, 0};
+    R |= top;
+  }
+  if (has(h4[(L + 1) & 3], R) || has(h4[(L + 3) & 3], R)) return {popc(R), R};
+  return {1, R};
+}
+// No trumps in play: the leader's side cannot take all the tricks (bridge-solver's
+// CannotTakeAllNoTrump: too short in the suits it tops, or held up by stoppers).
+inline Res cannot_take_all_nt(const u64* h4, int L, u64 all, int n) {
+  const int bs[2] = {(L + 1) & 3, (L + 3) & 3};
+  const u64 a1 = h4[L], a2 = h4[L ^ 2], ac = a1 | a2;
+  int lengths = 0, winners = 0, in_charge[2] = {0, 0};
+  u64 topR = 0, stopR = 0;
+  for (int s = 0; s < 4; s++) {
+    const u64 alls = all & LANE(s);
+    if (!alls) continue;
+    const u64 top = highest(alls);
+    if (!(ac & top)) {
+      in_charge[(h4[bs[0]] & top) ? 0 : 1]++;
+      topR |= top;
+      continue;
+    }
+    const u64 as = ac & LANE(s);
+    const int maxlen = std::max(popc(a1 & LANE(s)), popc(a2 & LANE(s)));
+    lengths += maxlen;
+    if (const u64 bsuit = alls & ~as) {
+      const u64 stopper = highest(bsuit);
+      const int holder = (h4[bs[0]] & stopper) ? 0 : 1;
+      const u64 before = h4[(bs[holder] + 3) & 3];
+      const u64 higher = as & above(stopper);
+      if (has(before, higher) && popc(h4[bs[holder]] & LANE(s)) > popc(higher)) {
+        winners += popc(higher);
+        in_charge[holder]++;
+        stopR |= alls & ge(stopper);
+        continue;
+      }
+    }
+    winners += maxlen;
+  }
+  if (lengths < n) return {1, topR};
+  const int most = std::max(in_charge[0], in_charge[1]);
+  if (most > 0 && winners + most <= n) return {1, topR | stopR};
+  return {0, 0};
+}
+}  // namespace bsb
+
+template <bool NT>
+inline bool bs_bounds(int n, int L, int target, u64 all, u64& R, bool& value) {
+  using namespace bsb;
+  constexpr u64 T = LANE(3);
+  const bool max_node = !(L & 1);
+  const int needA = max_node ? target : n - target + 1, needB = n - needA + 1;
+  const int P = L ^ 2, LH = (L + 1) & 3, RH = (L + 3) & 3;
+  const u64 allT = NT ? 0 : all & T;
+  const bool trumps = allT != 0;
+  const u64 myT = H[L] & allT, pdT = H[P] & allT, lhoT = H[LH] & allT, rhoT = H[RH] & allT;
+  auto decide = [&](bool a_wins, u64 r) {
+    value = a_wins ? max_node : !max_node;
+    R = fill_up(r);
+    return true;
+  };
+  // The leader's side.
+  if (trumps) {
+    Res a = slow_trump(allT, myT, pdT, lhoT, rhoT, true, n);
+    const int len = trump_length(myT, pdT, lhoT, rhoT);
+    if (len > 0 && len >= a.tricks) a = {len, 0};
+    if (a.tricks >= needA) return decide(true, a.R);
+    const int gap = needA - a.tricks;
+    if (gap <= 2)
+      for (int seat : {L, P}) {
+        const Res t = trump_rank(allT, H[seat] & allT, lhoT | rhoT, needA);
+        if (t.tricks > 0) return decide(true, t.R);
+      }
+    if (gap <= 3) {
+      const Res d = draw_then_cash(H, L, allT, n);
+      if (d.tricks >= needA) return decide(true, d.R);
+    }
+  }
+  // The other side.
+  Res b = trumps ? top_trump(allT, lhoT, rhoT) : other_slow_nt(H, L, all);
+  if (!trumps && b.tricks == 0 && needB == 1) b = cannot_take_all_nt(H, L, all, n);
+  if (b.tricks == 0 && trumps) b = slow_trump(allT, lhoT, rhoT, pdT, myT, false, n);
+  if (trumps) {
+    const int len = trump_length(lhoT, rhoT, pdT, myT);
+    if (len > 0 && len >= b.tricks) b = {len, 0};
+    if (needB - b.tricks == 1)
+      for (int seat : {LH, RH}) {
+        const Res t = trump_rank(allT, H[seat] & allT, myT | pdT, needB);
+        if (t.tricks > 0) {
+          b = t;
+          break;
+        }
+      }
+  }
+  if (b.tricks >= needB) return decide(false, b.R);
+  return false;
 }
 
 // Extra weight for the table's best lead, on top of what DDS's weights give it (fewer nodes: 1.5%).
@@ -2086,6 +2380,54 @@ void self_test(int n, int L, int target, u64 R, bool res) {
 }
 struct STPrint { ~STPrint() { fprintf(stderr, "selftest checks %llu\n", (unsigned long long)g_st_checks); } } g_stp;
 #endif
+// Cut-off cards (bridge-solver's cutoff cache, by Hanhong Xue: github.com/macroxue/bridge-solver,
+// solver.cc BuildCutoffIndex): the lead that last cut off, keyed by the
+// leader's exact hand, the parity of partner's suit lengths and, in suit contracts, the
+// target. Tried first. Only an ordering hint: a collision or a stale entry costs nodes,
+// never correctness. Entries carry the deal's generation, so a new deal starts empty.
+#ifndef CUTC
+#define CUTC 1
+#endif
+#ifndef CUTC_MIN
+#define CUTC_MIN 4
+#endif
+#ifndef CUTF
+#define CUTF 1
+#endif
+#if CUTC
+struct CutEntry {
+  uint32_t tag;
+  uint8_t card;
+};
+#ifndef CUT_BITS
+#define CUT_BITS 16
+#endif
+thread_local CutEntry g_cut[1 << CUT_BITS];
+template <bool NT>
+inline u64 cut_hash_lead(int L, int target) {
+  const int P = L ^ 2;
+  const unsigned par = unsigned(len_of(P, 0) & 1) | unsigned(len_of(P, 1) & 1) << 1 | unsigned(len_of(P, 2) & 1) << 2 |
+                       unsigned(len_of(P, 3) & 1) << 3;
+  const u64 extra = u64(par) | u64(NT ? 0 : target) << 4 | u64(g_gen) << 8;
+  return (H[L] * 0x9E3779B97F4A7C15ull) ^ (extra * 0xC2B2AE3D27D4EB4Full);
+}
+// Followers (bridge-solver's keys): following suit, the led suit's cards at the trick start,
+// the card winning so far and the leader; void, the hand, the winning card (at no trumps its
+// hand) and in suit contracts the target. Position in the trick K keeps the four apart.
+template <bool NT>
+inline u64 cut_hash_follow(int K, int L, int s, u64 all, u64 lane, u64 in_suit, u64 best, int bw, int target) {
+  u64 a, extra;
+  if (in_suit) {
+    a = all & lane;
+    extra = u64(__builtin_ctzll(best)) | u64(L) << 6 | u64(K) << 8 | 1ull << 10;
+  } else {
+    a = H[s];
+    extra = (NT ? u64(bw) : u64(__builtin_ctzll(best))) | u64(NT ? 0 : target) << 6 | u64(K) << 11;
+  }
+  return (a * 0x9E3779B97F4A7C15ull) ^ ((extra | u64(g_gen) << 16) * 0xC2B2AE3D27D4EB4Full);
+}
+#endif
+
 template <bool NT>
 bool lead(int n, int L, int target, u64& R) {
   constexpr u64 TR = Cfg<NT>::TR;
@@ -2213,6 +2555,13 @@ bool lead(int n, int L, int target, u64& R) {
 #endif
       return value;
     }
+#if BSB
+    if (bs_bounds<NT>(n, L, target, all, R, value)) {
+      STAT(g_bsb++);
+      tt_store(R, value, 0);
+      return value;
+    }
+#endif
   } else {
     if (quick_tricks<NT>(L, needL, all, R)) {
       STAT(g_qt++);STAT(g_n[n][1]++);
@@ -2321,6 +2670,16 @@ bool lead(int n, int L, int target, u64& R) {
       }
     }
   }
+#if CUTC
+  const u64 cuth = n >= CUTC_MIN ? cut_hash_lead<NT>(L, target) : 0;
+  CutEntry& cute = g_cut[cuth >> (64 - CUT_BITS)];
+  if (n >= CUTC_MIN && cute.tag == uint32_t(cuth)) {
+    const u64 cc = 1ull << cute.card;
+    if (cc & cand)
+      for (int i = 0; i < 16; i++)
+        if (cards[i] == cc) key[i] = uint16_t(0xFFF0 | (key[i] & 15));
+  }
+#endif
   u64 Racc = 0;
   bool res = !cut;
   u64 bestc = 0;
@@ -2362,6 +2721,9 @@ bool lead(int n, int L, int target, u64& R) {
       res = cut;
       bestc = c;
       S->killer[n][0] = c;
+#if CUTC
+      if (n >= CUTC_MIN) cute = {uint32_t(cuth), uint8_t(__builtin_ctzll(c))};
+#endif
       STAT(g_tried[0]++);
       STAT(g_first[0] += tried == 1);
       STAT(g_hx[hint != 0][1]++);
@@ -2649,9 +3011,21 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
 #endif
     }
   }
+#if CUTC && CUTF
+  const bool usec = n >= CUTC_MIN && (cand & (cand - 1));
+  const u64 cuth = usec ? cut_hash_follow<NT>(K, L, s, all, lane, in_suit, best, bw, target) : 0;
+  CutEntry& cute = g_cut[cuth >> (64 - CUT_BITS)];
+  u64 forced = (usec && cute.tag == uint32_t(cuth)) ? (1ull << cute.card) & cand : 0;
+#endif
   while (cand) {
+#if CUTC && CUTF
+    const u64 c = forced ? forced : (dq && (cand & (cand - 1))) ? pick_best(cards, key, cand)
+                  : in_suit ? pick_follow<NT, K>(cand, first, s, lane, best, bw) : pick_void<NT, K>(cand, first, s, best, bw);
+    forced = 0;
+#else
     const u64 c = (dq && (cand & (cand - 1))) ? pick_best(cards, key, cand)
                   : in_suit ? pick_follow<NT, K>(cand, first, s, lane, best, bw) : pick_void<NT, K>(cand, first, s, best, bw);
+#endif
     cand ^= c;
     STAT(firstc = first ? c : firstc);
 #ifdef STATS
@@ -2688,6 +3062,9 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
     LENS += 1ull << sh;
     if (r == cut) {
       R = Rc;
+#if CUTC && CUTF
+      if (usec) cute = {uint32_t(cuth), uint8_t(__builtin_ctzll(c))};
+#endif
       STAT(g_tried[K]++);
 #ifdef STATS
       if (K == 1 && why0 >= 0 && n >= 9) g_whyn[why0]++;

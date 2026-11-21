@@ -1547,3 +1547,56 @@ Not done: the same sort in the 3-card table (its no-trump half would shrink from
 configurations, 377 MB to 251 MB, with a new file layout); a 5-card table filled from deeper
 endings or probed only where a hit is likely; canonical order among suits of equal length in
 the 3-card table.
+
+## Round 18: ideas from bridge-solver (branch bsolver-ideas, 2026-11-21)
+
+bridge-solver (Hanhong Xue's, github.com/macroxue/bridge-solver; measured as Robert Salita's
+fork at `faster-search` 61a6e59, the build BEN ships, whose bounds have since been merged into
+bridge-solver) is 2x DDS. The cut-off cards and the slow-trump, trump-length, top-trump and
+slow no-trump rules are Xue's; trump tricks by rank, draw trumps then cash and "cannot take
+every trick" at no trumps are Salita's. Counted on the
+public set with the same definition (positions entered at a trick start): DDS 65,900 per
+problem, bridge-solver 48,300 (42,300 with a perfect first guess; it asks 5.6 questions per
+problem from a crude guess), ddfast 45,100 at 2.25 questions. So its search is about as
+node-efficient as ddfast's, without endgame tables; ddfast's lead over it is cheaper nodes
+(about 350 cycles per trick-start node against 640) and the fitted guess. Three of its ideas
+were tried here. Baseline: main with a `p4_v6` table built on this machine (83,579,555 nodes;
+the M5 table in round 17 gives 82,061,772: fill depends on machine speed). Every figure below
+uses the same table.
+
+| | nodes (public set) | trick-start nodes |
+|---|---|---|
+| main | 83,579,555 | 27,295,213 |
+| + bridge-solver's sure-trick bounds (`BSB`) | 74,795,891 (-10.5%) | 24,393,030 |
+| + cut-off cards at leads (`CUTC`) | 71,325,309 (-4.6%) | 23,436,591 |
+| + cut-off cards at followers (`CUTF`) | 63,461,268 (-11.0%) | 20,736,865 |
+
+Cycles, one core (Zen 5, CPU 0), against a control with both switches off (`-DBSB=0
+-DCUTC=0`), alternating: single problems 15.72-15.93M -> 13.55-13.92M per deal (-13.3%), full
+tables 150.7-154.2M -> 131.2-131.7M per table (-13.8%). The bounds alone: -4.9% and -2.5%.
+
+- **Sure-trick bounds (`bs_bounds`, after DDS's quick and later tricks):** slow trump tricks
+  (Kx behind the ace, KQ or KQJ against it, Qxx behind or against AK), trump length, trump
+  tricks guaranteed by rank, draw trumps then cash, the other side's top trumps, and at no
+  trumps (or none left) the other side's slow tricks and "the leader's side cannot take every
+  trick" (too short in the suits it tops, or held up by stoppers). Each proof's cards are top
+  slices of suits, so they go into the table as DDS's winning ranks do (with the suit lengths
+  in the key). Where bridge-solver records only some of a suit's winners, all are kept. They
+  decide 237,000 trick starts on the public set. Without side-suit fast tricks combined with
+  trump tricks (bridge-solver's `side_tricks`), which would need a per-suit quick-trick count.
+- **Cut-off cards (`CUTC`, `CUTF`):** a per-thread table of 2^16 entries (`CUT_BITS`), the card
+  that last cut off, tried first. Keys as bridge-solver's: at a lead, the leader's exact hand,
+  the parity of partner's suit lengths and (suits) the target; following suit, the led suit's
+  cards at the trick start, the card winning so far and the leader; void, the hand, the
+  winning card (no trumps: its hand) and (suits) the target. Tagged with the deal's
+  generation; an ordering hint only. 2^14 entries: 63.85M nodes, 2^18: 63.34M.
+- **Not adopted: fewer stored cards for quick tricks** (bridge-solver's `MinimizeFastTricks`:
+  trump length alone, or the top cards of one suit): -0.1% nodes, removed. ddfast already
+  extends runs only where the proof needs them (`RUNOPT`), prunes irrelevant cards of a
+  suit, and plays the top card of each run; bridge-solver's other pattern work (extending
+  runs as needed, lifting a run's winner) makes up for what ddfast does already.
+
+Exactness: `test_ddfast quick`, chunks 1-3 of the 100,000-deal reference set (37,500 deals),
+`tables 200 4242` all exact; `test_play 300 3` all agree with DDS; `-DSELFTEST=10` 461,012
+checks on the public set, no failure; `-DVERIFY_ORDER -DVERIFY_BOUNDS` on the public set, no
+abort; 20,000 random positions each of 6 and 9 cards a hand all correct against DDS.
