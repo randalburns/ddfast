@@ -1,7 +1,8 @@
 # ddfast's speed over its history
 
 How ddfast's own speed changed across the commits that moved it, on Linux x86-64 with the
-AVX-512 code, measured with one program at every point; and from #10 on, on an Apple M5. [NOTES.md](NOTES.md) has the reasoning
+AVX-512 code, measured with one program at every point; from #10 on, on an Apple M5; and, on
+the M5, for the work of a bot playing a deal (smaller positions, every card's score). [NOTES.md](NOTES.md) has the reasoning
 and the full measurements behind each step.
 
 ## Method
@@ -63,7 +64,8 @@ Highway as two code paths: exactly the instructions of #5, so the Highway path c
 AVX-512 code nothing), #8 (CI), #10 (tables folded into ddfast), #16 (opt-in mapping of the
 table files) and #19 (the 4-card table with all four suits sorted at no trumps: +0.5% here; it
 mostly shrinks the table file, 540 MB against 836 MB). The PRs are numbered by when they were
-opened, not merged: #7 and #8 reached `main` before #6.
+opened, not merged: #7 and #8 reached `main` before #6. #28 to #30 are measured on the M5 only
+(below).
 
 ## On an Apple M5
 
@@ -107,9 +109,116 @@ From #10 to #25: 17% fewer cycles per problem and 22% fewer per table on one thr
 - **Throughput on four threads is less steady than cycles.** Every point lost about 10% between
   the first round and the later ones (#10: 990, 878, 899 problems per second), as the machine
   warmed. Within one round #25 is 13-18% ahead of #19 on problems and 20-25% on tables.
-- **Smaller positions gain less.** Trick starts in batches of 32 with two hands fixed (as in
-  NOTES round 19), one thread, #10 to #25: no change at 7 to 9 cards a hand (#21 cost about 6%
-  at 8 cards and #25 took most of it back), -3% at 10, -10% at 11, -7% at 12.
+- **Smaller positions gain less**: the next section but one.
+
+### #25 to #30
+
+The later points against #25, measured together on 2026-11-22 on the idle machine on mains
+power (the earlier points are not run again; #25 repeats its row above to 0.1%). Three
+alternating rounds, the lowest cycles.
+
+| Point | Commit | Change | One thread, problem: M cycles (M instructions) | One thread, table: M cycles (M instructions) | Four threads, problem / table: M cycles |
+|---|---|---|---|---|---|
+| #25 | `af908de` | (as above) | 13.43 (52.53) | 110.9 (436.8) | 13.47 / 110.3 |
+| #28 | `2c8139c` | `set_options()`: the bounds and the cut-off cards can be turned off at run time | 13.58 (53.03) | 112.2 (440.8) | 13.48 / 111.2 |
+| #30 | `ee54702` | Table batches hand out one strain of a deal at a time | 13.54 (53.03) | 112.0 (440.8) | 13.46 / 111.2 |
+
+- **#28 costs 1%**: 0.95% more instructions per problem and 0.9% per table, and 1.1% and 1.2% more
+  cycles on one thread. The switches are tested at run time where the code was compiled in
+  or out.
+- **#30 leaves the work as it was** (the instructions of #28) and does not show at 300 tables a
+  batch: tables per second on four threads were 127.4, 121.6, 118.6 at #28 and 124.6, 122.8,
+  120.2 at #30 in the three rounds (133.5, 121.5, 109.8 at #25), the machine warming from
+  round to round. Its gain is in small batches, where whole tables left threads waiting at
+  the end: with 600 tables in batches of 32, 118.2 -> 121.1 tables per second on four threads
+  and 140.0 -> 170.6 on ten; in batches of 100, 109.8 -> 110.8 and 152.1 -> 164.9 (NOTES,
+  round 21; measured with other work on the machine).
+- **#24 and #29** change `SolveBoard` with `solutions` 3 and `card_results`, which this
+  workload does not call: the next section.
+
+## A bot's play: smaller positions and every card's score (Apple M5)
+
+A bot that plays a deal (BEN, a single-dummy solver) does not solve full deals. It fixes the
+two hands it can see, deals the other two many times, and solves each sample from the trick
+being played, often for the score of every card it could play. `bench/bench_play_history.cpp`
+measures that work at every point, on one thread, with the libraries and the compiler of the
+section above:
+
+- **Batches of 32:** a random deal and strain played out at random to the trick wanted; then
+  the hands of the two seats other than the one to play and its partner are re-dealt 32
+  times. Sizes are cards a hand at the start of the trick.
+- **Positions:** `solve_position` (the value of a trick start), 12 batches at 12 cards, 24 at
+  11, 50 at 10, 120 at each smaller size.
+- **Boards:** the DDS-compatible `SolveBoard` (python/src/dds_compat.cpp, each commit's own,
+  target -1, mode 1) with `solutions` 1 (one best card) and 3 (every card's score), at a lead
+  and with two cards played to the trick; 8 batches at 11 cards, 16 at 10, 40 at 9 and 8.
+  From #16: the layer came with #15.
+- **Cards:** the native `card_results` at a lead, the same numbers of batches.
+- **Measure:** thousands of cycles per position, board or call; one untimed pass, the best of
+  three, three alternating rounds over all points, the lowest. The rounds of a cell lie
+  within 5% from 9 cards up; the cells of under 150 thousand cycles (8 cards and fewer) move
+  by up to 14%, so read them to the nearest tenth only.
+- **Same answers:** a hash of every answer of each line (for boards the scores, since with
+  `solutions` 1 the card may be another equally good one) is the same at every point.
+
+Positions, `solve_position`:
+
+| cards a hand | #16 | #19 | #21 | #24 | #25 | #28 | #29 | #16 to #29 |
+|---|---|---|---|---|---|---|---|---|
+| 12 | 5,267 | 5,137 | 4,351 | 4,354 | 4,257 | 4,297 | 4,289 | -19% |
+| 11 | 1,922 | 1,904 | 1,771 | 1,779 | 1,745 | 1,754 | 1,757 | -9% |
+| 10 | 440 | 432 | 413 | 418 | 411 | 413 | 414 | -6% |
+| 9 | 244 | 241 | 243 | 244 | 239 | 241 | 242 | -1% |
+| 8 | 106 | 106 | 105 | 107 | 103 | 104 | 104 | -2% |
+| 7 | 31 | 31 | 33 | 33 | 32 | 32 | 32 | |
+| 6 | 9 | 10 | 10 | 10 | 10 | 10 | 10 | |
+
+Boards at a lead, `SolveBoard`:
+
+| cards a hand | `solutions` | #16 | #19 | #21 | #24 | #25 | #28 | #29 | #16 to #29 |
+|---|---|---|---|---|---|---|---|---|---|
+| 11 | 1 | 3,926 | 3,889 | 3,593 | 3,588 | 3,530 | 3,565 | 3,567 | -9% |
+| 10 | 1 | 1,574 | 1,552 | 1,532 | 1,526 | 1,509 | 1,520 | 1,520 | -3% |
+| 9 | 1 | 323 | 316 | 332 | 333 | 316 | 318 | 318 | -2% |
+| 8 | 1 | 131 | 128 | 139 | 138 | 135 | 133 | 137 | |
+| 11 | 3 | 8,466 | 8,415 | 7,899 | 6,557 | 6,395 | 6,444 | 6,455 | -24% |
+| 10 | 3 | 3,641 | 3,596 | 3,576 | 2,901 | 2,878 | 2,901 | 2,898 | -20% |
+| 9 | 3 | 816 | 814 | 841 | 640 | 627 | 625 | 634 | -22% |
+| 8 | 3 | 332 | 340 | 358 | 286 | 277 | 278 | 276 | -17% |
+
+Boards with two cards played to the trick, `SolveBoard`:
+
+| cards a hand | `solutions` | #16 | #19 | #21 | #24 | #25 | #28 | #29 | #16 to #29 |
+|---|---|---|---|---|---|---|---|---|---|
+| 11 | 1 | 1,660 | 1,680 | 1,539 | 1,558 | 1,528 | 1,515 | 1,558 | -6% |
+| 10 | 1 | 732 | 716 | 737 | 733 | 729 | 727 | 730 | 0% |
+| 9 | 1 | 232 | 224 | 221 | 224 | 212 | 214 | 218 | -6% |
+| 8 | 1 | 79 | 79 | 83 | 83 | 79 | 79 | 82 | |
+| 11 | 3 | 1,787 | 1,774 | 1,677 | 1,686 | 1,651 | 1,644 | 1,701 | -5% |
+| 10 | 3 | 781 | 785 | 801 | 800 | 798 | 778 | 802 | +3% |
+| 9 | 3 | 257 | 263 | 256 | 256 | 251 | 245 | 252 | -2% |
+| 8 | 3 | 94 | 98 | 100 | 99 | 96 | 95 | 99 | |
+
+Every card's result at a lead, `card_results`:
+
+| cards a hand | #16 | #19 | #21 | #24 | #25 | #28 | #29 | #16 to #29 |
+|---|---|---|---|---|---|---|---|---|
+| 11 | 10,316 | 10,212 | 10,529 | 10,508 | 10,082 | 10,130 | 8,176 | -21% |
+| 10 | 3,253 | 3,208 | 3,180 | 3,177 | 3,057 | 3,076 | 2,255 | -31% |
+| 9 | 714 | 708 | 731 | 730 | 714 | 719 | 558 | -22% |
+| 8 | 346 | 340 | 356 | 351 | 338 | 336 | 282 | -18% |
+
+- **The search steps that carry full deals fade with the size of the hand.** #21 takes 15% at
+  12 cards, 7% at 11 and 4% at 10, nothing at 9 and 8, and costs about 6% at 7; #25 takes 2 to
+  4% from 8 cards up. From #16 to #29 a position of 9 cards or fewer costs what it did.
+- **What a bot gains is in how the cards are asked about.** #24 takes 17 to 24% off every
+  card's score at a lead (`SolveBoard`, `solutions` 3), at every size here, and #29 takes 16
+  to 27% off `card_results`. Neither changes the search.
+- **In the middle of a trick nothing has moved** beyond what the search steps give at 11
+  cards: both #24 and #29 leave `SolveBoard` there as it was.
+- **One best card at a lead** (`solutions` 1) follows the positions: -9% at 11 cards, -3% at
+  10, nothing below.
+- **#28** costs under 1% here too.
 
 ## Before git
 
@@ -137,6 +246,21 @@ sh bench/history.sh 3 pr10:f8319fa pr11:157e688 pr16:702b50b pr19:58c41aa pr21:8
 THREADS=4 REPS=5 sh bench/history.sh 3 pr10:f8319fa pr11:157e688 pr16:702b50b pr19:58c41aa pr21:8bd213a \
   pr24:9c9d2ca pr25:af908de
 ```
+
+The later points and the play benchmark (`PLAY=1`; `bin/libdds.a` must be built here, and
+`SCALE`, default 2, multiplies the numbers of batches):
+
+```sh
+sh bench/history.sh 3 pr25:af908de pr28:2c8139c pr30:ee54702
+THREADS=4 REPS=5 sh bench/history.sh 3 pr25:af908de pr28:2c8139c pr30:ee54702
+PLAY=1 sh bench/history.sh 3 pr16:702b50b pr19:58c41aa pr21:8bd213a pr24:9c9d2ca pr25:af908de \
+  pr28:2c8139c pr29:66a36f5
+```
+
+The M5 figures were made with Apple clang 17 (the command-line tools). Xcode's clang 21 makes
+the same source about 2% slower (53.98M instructions per problem against 53.00M at #30); with
+both installed, `DEVELOPER_DIR=/Library/Developer/CommandLineTools` in front of the commands
+selects the first.
 
 Commits before #10 need ddclaim's checkout for their `extern/ddclaim` (`DDCLAIM_REPO`,
 default `../ddclaim`). `N` and `SEED` choose the workload (default 300 and 7).
