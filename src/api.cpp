@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include <sched.h>
 #include <condition_variable>
@@ -72,6 +74,7 @@ struct Pool {
   // The current batch.
   const Problem* problems = nullptr;
   const Deal* deals = nullptr;  // a table batch instead (problems is then null)
+  bool by_strain = false;       // a table batch's items are single strains: item 5 * deal + strain
   Table* tables = nullptr;
   const uint32_t* order = nullptr;
   uint8_t* tricks = nullptr;
@@ -138,7 +141,8 @@ struct Pool {
         const size_t k = next.fetch_add(1, std::memory_order_relaxed);
         if (k >= n) break;
         const size_t i = order ? order[k] : k;
-        if (deals) detail::solve_table(deals[i].hand, tables[i].tricks);
+        if (deals && by_strain) detail::solve_table_strains(deals[i / 5].hand, int(i % 5), int(i % 5) + 1, tables[i / 5].tricks);
+        else if (deals) detail::solve_table(deals[i].hand, tables[i].tricks);
         else solve(&problems[i], 1, &tricks[i]);
         done++;
       }
@@ -333,7 +337,33 @@ void solve_tables_parallel(const Deal* deals, size_t n, Table* tables, const int
     P.start(cpus, ncpu);
   }
   P.problems = nullptr, P.tricks = nullptr, P.deals = deals, P.tables = tables;
-  run_round(P, n, nullptr, ncpu, stats);
+  // A worker takes one strain of one deal at a time (five items a deal), the strains expected
+  // to be costliest first. A whole table is a large item, and its costliest strain holds 41%
+  // of its work on average, so whole tables in the given order left workers waiting at the end
+  // of a small batch: 15% of the thread time at 32 tables on 4 threads, 3% this way
+  // (docs/NOTES.md, round 21). The strains of a deal share nothing, so the work is the same.
+  // Whole tables on one thread, where the order cannot matter, and with DDFAST_NCTX (the
+  // interleaved searches take whole tables).
+  if (ncpu < 2 || getenv("DDFAST_NCTX")) {
+    run_round(P, n, nullptr, ncpu, stats);
+    return;
+  }
+  std::vector<float> cost(5 * n);
+  std::vector<uint32_t> ord(5 * n);
+  for (size_t i = 0; i < n; i++)
+    for (int t = 0; t < 5; t++) {
+      Problem q;
+      memcpy(q.hand, deals[i].hand, sizeof q.hand);
+      q.trump = uint8_t(t);
+      float c = 0;  // predict_cost gives the log of a time: both sides' declarers, summed as times
+      for (int d = 0; d < 2; d++) q.declarer = uint8_t(d), c += std::exp(predict_cost(q));
+      cost[5 * i + size_t(t)] = c;
+    }
+  std::iota(ord.begin(), ord.end(), 0u);
+  std::stable_sort(ord.begin(), ord.end(), [&](uint32_t a, uint32_t b) { return cost[a] > cost[b]; });
+  P.by_strain = true;
+  run_round(P, 5 * n, ord.data(), ncpu, stats);
+  P.by_strain = false;
 }
 
 std::vector<int> available_cpus(bool smt) {

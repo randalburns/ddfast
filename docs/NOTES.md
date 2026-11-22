@@ -1748,3 +1748,63 @@ Tried and not adopted:
 Not tried: the first target of a trick-start solve set from the best card so far (for three
 cards played; the solver takes one, but play.cpp's interface to it does not pass it on), and
 the from-the-best-so-far method in the DDS layer's `solutions` 3 in the middle of a trick.
+
+## Round 21: table batches hand out strains (branch tables-by-strain, 2026-11-22)
+
+A study of what the parallel calls lose at the end of a batch, where some threads have run out
+of work while others finish long deals (Apple M5, random deals; costs per item from 40,000
+problems and 12,000 tables on one thread, batches traced on 3, 4 and 10 threads, and a
+simulation from the measured costs that reproduced the traced batches' waiting within about a
+point at 3 and 4 threads).
+
+- The pool hands out one item at a time from a shared counter, so there is nothing for work
+  stealing to add: per-thread queues with stealing simulate the same as the counter.
+  `solve_parallel` sorts by `predict_cost` (rank correlation with the cost 0.42 here, 0.43 in
+  round B); `solve_tables_parallel` handed out whole tables in the given order.
+- Costs are skewed: the costliest 1% of problems hold 11% of the work and the costliest 10%
+  hold 44% (tables 7.5% and 35%); the longest of 40,000 problems is 108 times the mean.
+- Thread time spent waiting at the end of a batch, before this change, 4 threads (10 in
+  brackets): problems 17% (49%) at 32 a batch, 5% (24%) at 100, 1.5% (8.5%) at 300, 0.5%
+  (2.5%) at 1,000; tables 15% (41%), 6% (19%), 1.7% (8%), 0.4% (1.9%).
+- The shortfall of four threads against four times one thread is the clock, not waiting: the
+  instructions and the instructions per cycle are the same on 1, 3 and 4 threads, the waiting
+  1.5% at 300 problems, and a performance core runs at 4.37 GHz alone and 3.3 to 3.6 GHz with
+  four busy (2.5 GHz with all ten cores busy).
+
+Changed: `solve_tables_parallel` on two or more threads hands out one strain of one deal at a
+time (five items a deal), the strains expected to be costliest first (`predict_cost` of both
+sides' declarers). A table's costliest strain holds 41% of its work on average, and its
+strains share nothing (the search table starts empty at each strain's first declarer), so the
+instructions per table are the same (416.6-417.3M before, 417.0-417.5M after). Simulated
+waiting on 4 threads: 14.3% -> 2.6% at 32 tables, 5.1% -> 0.9% at 100, 1.75% -> 0.3% at 300;
+on 10 threads 44.5% -> 16%, 21.5% -> 5.5%, 8.5% -> 1.7%. On one thread, and with `DDFAST_NCTX`,
+whole tables as before. `WorkerStats::deals` counts strains in such a batch.
+
+Tables per second, 600 random tables in batches back to back, before -> after, the best of
+three alternating runs (in brackets the three gains run by run). The machine was shared with
+other work throughout, so the figures are low and uneven; the results are the same.
+
+| batch | 4 threads | 10 threads |
+|---|---|---|
+| 32 | 118.2 -> 121.1 (+2%, +7%, +6%) | 140.0 -> 170.6 (+22%, +22%, +26%) |
+| 100 | 109.8 -> 110.8 (+1%, +13%, +1%) | 152.1 -> 164.9 (+7%, +26%, +5%) |
+| 300 | 104.2 -> 106.3 (+1%, +2%, +5%) | 160.1 -> 165.3 (+6%, +8%, +0%) |
+
+On 4 threads the measured gain is smaller than the simulation's (+14% at 32); not explained
+(the simulation assumes four free cores, which the machine did not have).
+
+Not done, from the same simulation:
+
+- Problems in small batches: a perfect order would take the waiting on 4 threads from 17.6%
+  to 6.8% at 32 and from 6.3% to 1.5% at 100, but the predictor is far from that, and at 32
+  problems on 10 threads the best possible order still waits 49% (one deal outlasts the
+  rest). Only a better cost estimate or splitting one deal across cores moves that.
+- Idle threads joining the last long deals (`solve_deal_parallel`): at best +8% at 32
+  problems on 4 threads, and a running search cannot be joined, only restarted.
+- Steering long items to the fast cores: a few percent at most on 10 threads, and macOS moves
+  threads between core types.
+
+Exactness: `test_ddfast quick` and `tables 300 5` (solve_table, solve_tables,
+solve_tables_parallel) all exact; the hash of 600 tables is the same before and after on 4
+and 10 threads at each batch size.
+

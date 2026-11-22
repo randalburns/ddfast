@@ -3554,12 +3554,16 @@ bool query_position(const Position& p, int target, bool keep) {
   return ::solve_position(p, 0, keep, target) != 0;
 }
 
-void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) {
+void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]) { solve_table_strains(hand, 0, 5, tricks); }
+
+// Rows s0 .. s1 - 1 of the table only. The strains share nothing: the search table starts
+// empty at each strain's first declarer.
+void solve_table_strains(const uint16_t hand[4][4], int s0, int s1, uint8_t tricks[5][4]) {
   Position p;
   memcpy(p.hand, hand, sizeof p.hand);
   ensure_state();
   if (!S->tt.dir) S->tt.alloc();  // the default state's table is allocated on first use
-  for (int strain = 0; strain < 5; strain++) {
+  for (int strain = s0; strain < s1; strain++) {
     p.trump = uint8_t(strain);
     int v[4] = {-1, -1, -1, -1};  // North-South's tricks, by declarer
     for (int di = 0; di < 4; di++) {

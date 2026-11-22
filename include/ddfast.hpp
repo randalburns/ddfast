@@ -156,7 +156,7 @@ void solve_tables(const Deal* deals, size_t n, Table* tables);
 // does not allow hardware counters).
 struct WorkerStats {
   int cpu = -1;
-  size_t deals = 0;   // problems or tables solved
+  size_t deals = 0;   // problems solved; in a table batch on two or more threads, strains (five a table)
   double busy_s = 0;  // time spent solving (excludes waiting for work)
   double cycles = 0;  // user-mode core cycles spent solving
   double instructions = 0;
@@ -180,7 +180,9 @@ std::vector<int> available_cpus(bool smt = true);
 void solve_parallel(const Problem* problems, size_t n, uint8_t* tricks, const int* cpus, int ncpu,
                     BatchOrder order = BatchOrder::Predicted, std::vector<WorkerStats>* stats = nullptr);
 
-// Like solve_tables(), on the same worker pool, one table at a time per worker.
+// Like solve_tables(), on the same worker pool. A worker takes one strain of one deal at a
+// time, the strains expected to be costliest first, so that the end of a batch does not leave
+// workers idle.
 void solve_tables_parallel(const Deal* deals, size_t n, Table* tables, const int* cpus, int ncpu,
                            std::vector<WorkerStats>* stats = nullptr);
 
