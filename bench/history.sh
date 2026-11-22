@@ -4,7 +4,7 @@
 # from this checkout's copies), its library built for this machine (LIBONLY, -march=native,
 # so the AVX-512 code on an AVX-512 CPU), and bench_history linked to it; then ROUNDS rounds
 # over all points, pinned to CPU (default 0). Use the minimum of the rounds per point.
-#   sh bench/history.sh [ROUNDS] NAME:COMMIT ...
+#   sh bench/history.sh [ROUNDS] NAME:COMMIT ...   (N problems and tables, default 300; SEED, default 7)
 # The table files come from $DDFAST_TABLES through a directory of links, so a commit that
 # expects a file the directory lacks builds it there, not in $DDFAST_TABLES. Old commits
 # need ddclaim's checkout at $DDCLAIM_REPO (default ../ddclaim) for their extern/ddclaim.
@@ -37,7 +37,7 @@ r=1
 while [ "$r" -le "$ROUNDS" ]; do
   for p in "$@"; do
     printf '%s %-8s ' "$r" "${p%%:*}"
-    DDCLAIM_DIR=$H/tables DDFAST_TABLES=$H/tables taskset -c "$CPU" "$H/bench-${p%%:*}" 100 1 3
+    DDCLAIM_DIR=$H/tables DDFAST_TABLES=$H/tables taskset -c "$CPU" "$H/bench-${p%%:*}" "${N:-300}" "${SEED:-7}" 3
   done
   r=$((r + 1))
 done
