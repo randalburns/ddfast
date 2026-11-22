@@ -15,10 +15,9 @@
 // Related worlds (last): batches of 32 positions at a trick start that share the hands of the
 // seat to play and one other seat, the other two hands dealt again each time (a player's
 // samples of the hidden hands), 13 down to 8 cards a hand; SCALE times 10, 10, 15, 30, 60 and
-// 100 batches. Each batch is timed with keep_table false and with it true after the batch's
-// first world. From another deal the library keeps the table only below 12 cards a hand, so
-// the two agree from 12 up; build with -DKEEP_OTHER_DEAL_BELOW=14 to time it kept at every
-// size.
+// 100 batches. Each batch is timed three ways: keep_table false; true after the batch's first
+// world; and true with Options::keep_other_deal_below 12, which keeps another deal's table
+// only below 12 cards a hand.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -220,7 +219,7 @@ int main(int argc, char** argv) {
   }
   static const int batches[14] = {0, 0, 0, 0, 0, 0, 0, 0, 100, 60, 30, 15, 10, 10};
   const int W = 32;
-  if (scale > 0) printf("related worlds, batches of %d sharing two hands: cycles per world, keep_table false; true (spread)\n", W);
+  if (scale > 0) printf("related worlds, batches of %d sharing two hands: cycles per world, keep_table false; true; true with keep_other_deal_below 12 (spread, against false)\n", W);
   for (int size = 13; size >= 8 && scale > 0; size--) {
     const int nb = std::max(2, int(batches[size] * scale));
     std::vector<PlayPosition> ps(size_t(nb) * W);
@@ -232,9 +231,12 @@ int main(int argc, char** argv) {
       for (int i = 1; i < W; i++) ps[size_t(b) * W + i] = another_world(p, fixed);
     }
     std::vector<Out> out(ps.size()), ref(ps.size());
-    long long best[2];
-    double spread[2];
-    for (int keep = 0; keep < 2; keep++) {
+    long long best[3];
+    double spread[3];
+    for (int keep = 0; keep < 3; keep++) {
+      ddfast::Options o = ddfast::options();
+      o.keep_other_deal_below = keep == 2 ? 12 : 14;
+      ddfast::set_options(o);
       long long lo = -1, hi = 0;
       for (int r = 0; r <= rounds; r++) {  // the first pass is not timed
         for (auto& x : out) memset(&x, 0, sizeof x);
@@ -249,10 +251,15 @@ int main(int argc, char** argv) {
       if (keep == 0) ref = out;
       else if (memcmp(ref.data(), out.data(), out.size() * sizeof(Out))) bad++;  // the same answers either way
     }
+    ddfast::Options off = ddfast::options();
+    off.keep_other_deal_below = 14;
+    ddfast::set_options(off);
     for (auto& o : out) mix(&o, sizeof o);
     calls += long(ps.size());
-    printf("%2d cards, %3d batches: %9.0f (%4.1f%%); %9.0f (%4.1f%%)  %+5.1f%%\n", size, nb, double(best[0]) / ps.size(), spread[0],
-           double(best[1]) / ps.size(), spread[1], 100.0 * (double(best[1]) / double(best[0]) - 1));
+    printf("%2d cards, %3d batches: %9.0f (%4.1f%%); %9.0f (%4.1f%%, %+5.1f%%); %9.0f (%4.1f%%, %+5.1f%%)\n", size, nb,
+           double(best[0]) / ps.size(), spread[0], double(best[1]) / ps.size(), spread[1],
+           100.0 * (double(best[1]) / double(best[0]) - 1), double(best[2]) / ps.size(), spread[2],
+           100.0 * (double(best[2]) / double(best[0]) - 1));
     fflush(stdout);
   }
   printf("%ld card_results positions; hash of every answer %016llx%s\n", calls, (unsigned long long)g_hash, bad ? "  (analyse_play or related worlds FAILED)" : "");

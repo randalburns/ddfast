@@ -2,7 +2,7 @@
 // DDS on positions reached by random legal play from random deals: every stage of the deal
 // and every point within a trick.
 //
-// usage: test_play [deals] [seed] [--no-bounds] [--no-cutoff]   (the flags: ddfast::set_options)
+// usage: test_play [deals] [seed] [--no-bounds] [--no-cutoff] [--keep-below N]   (the flags: ddfast::set_options)
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--no-bounds")) opts.sure_trick_bounds = false;
     else if (!strcmp(argv[i], "--no-cutoff")) opts.cutoff_cards = false;
+    else if (!strcmp(argv[i], "--keep-below") && i + 1 < argc) opts.keep_other_deal_below = atoi(argv[++i]);
     else args.push_back(argv[i]);
   }
   const int deals = args.size() > 0 ? atoi(args[0]) : 200;

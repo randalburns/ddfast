@@ -302,9 +302,10 @@ unsigned long long stat_nodes() { return detail::nodes(); }
 void set_options(const Options& o) {
   detail::g_sure_trick_bounds = o.sure_trick_bounds;
   detail::g_cutoff_min = o.cutoff_cards ? CUTC_MIN : 14;
+  detail::g_keep_other_deal_below = o.keep_other_deal_below < 1 ? 1 : o.keep_other_deal_below > 14 ? 14 : o.keep_other_deal_below;
 }
 
-Options options() { return {detail::g_sure_trick_bounds, detail::g_cutoff_min <= 13}; }
+Options options() { return {detail::g_sure_trick_bounds, detail::g_cutoff_min <= 13, detail::g_keep_other_deal_below}; }
 
 void solve_parallel(const Problem* problems, size_t n, uint8_t* tricks, const int* cpus, int ncpu, BatchOrder order,
                     std::vector<WorkerStats>* stats) {
