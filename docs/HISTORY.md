@@ -40,7 +40,7 @@ by 1% or more are kept; the others are listed below the table.
 | #6 | `4eda109` | Faster table directory, micro-optimizations, dead code removed | 14.00 (34.05) | 158.1 (376.5) | 4.70x / 4.48x |
 | #11 | `157e688` | Full tables: first questions from the same deal's other declarers | 13.87 (34.05) | 155.5 (371.1) | 4.75x / 4.56x |
 | #21 | `8bd213a` | bridge-solver's sure-trick bounds and cut-off cards | 12.08 (30.83) | 130.4 (321.1) | 5.45x / 5.44x |
-| #25 | `e40e47e` | Cut-off cards only from 8 cards a hand | 11.68 (30.39) | 122.6 (319.2) | 5.64x / 5.78x |
+| #25 | `af908de` | Cut-off cards only from 8 cards a hand | 11.68 (30.39) | 122.6 (319.2) | 5.64x / 5.78x |
 
 From the start to #25: 20% fewer cycles per problem (17% fewer instructions) and 26% fewer per
 table (21% fewer instructions).
@@ -79,7 +79,7 @@ per second; the rounds after brought it to about 4 times DDS. The repository's f
 ```sh
 export DDFAST_TABLES=/path/to/tables
 sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr11:157e688 pr21:8bd213a \
-  pr25:e40e47e
+  pr25:af908de
 ```
 
 Commits before #10 need ddclaim's checkout for their `extern/ddclaim` (`DDCLAIM_REPO`,
