@@ -28,7 +28,8 @@
 //                                                              threads, and DDS's SolveAllBoardsBin;
 //                                                              the process confined to the CPUs
 // Run the one-thread modes pinned (taskset -c 0). NO_DDS=1 leaves DDS out of `tables` and
-// `boards`.
+// `boards`. STAGES="tricks:cards,..." chooses the stages of `boards`: tricks already played
+// and cards played to the current one (default 0:1,3:0,6:2,9:1).
 //
 // LIB is loaded with its own symbol scope (RTLD_LOCAL | RTLD_DEEPBIND; on macOS a library's own
 // symbols already come first, so RTLD_LOCAL alone), so its DDS functions do not collide with the
@@ -457,7 +458,18 @@ int boards(size_t n, int threads, std::vector<int> cpus, unsigned long long seed
          with_dds ? "DDS/ddf" : "");
   int bad = 0;
   double sum_fast = 0, sum_lib = 0, sum_dds = 0;
-  for (auto [tricks, extra] : {std::pair{0, 1}, {3, 0}, {6, 2}, {9, 1}}) {
+  std::vector<std::pair<int, int>> stages = {{0, 1}, {3, 0}, {6, 2}, {9, 1}};
+  if (const char* e = getenv("STAGES")) {
+    stages.clear();
+    for (const char* q = e; *q;) {
+      int t = 0, x = 0, len = 0;
+      if (sscanf(q, "%d:%d%n", &t, &x, &len) < 2) break;
+      stages.push_back({t, x});
+      q += len;
+      if (*q == ',') q++;
+    }
+  }
+  for (auto [tricks, extra] : stages) {
     // `positions` positions at this stage, each a batch of n samples.
     std::vector<std::vector<BPos>> sets;
     for (int k = 0; k < positions; k++) {

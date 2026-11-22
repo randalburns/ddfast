@@ -3,7 +3,7 @@
 ddfast is a performance optimization of the search algorithms of
 [DDS](https://github.com/dds-bridge/dds), the widely used exact double-dummy solver for bridge.
 Given a deal, a strain and a declarer, it returns the number of tricks declarer's side takes
-with best play by both sides, the same answer as DDS, 4-5 times faster on one core.
+with best play by both sides, the same answer as DDS, about 5 times faster on one core.
 
 It isn't limited to full deals. Like DDS, it solves any position reached in play: a trick start
 with 1 to 13 cards in each hand, or a position in the middle of a trick. It also gives every
@@ -20,7 +20,7 @@ the move ordering work on those words without DDS's per-node bookkeeping, the tr
 table is a compact per-deal table of card patterns, the first question is chosen by a fitted
 guess, and the last 2, 3 and 4 cards of each hand are looked up in precomputed endgame tables
 (`src/tables.cpp`). [docs/NOTES.md](docs/NOTES.md) is the design and the full measurement
-history.
+history; [docs/HISTORY.md](docs/HISTORY.md) shows the speed over the main commits.
 
 Two techniques come from [bridge-solver](https://github.com/macroxue/bridge-solver), Hanhong
 Xue's double-dummy solver:
@@ -68,8 +68,8 @@ One core (CPU 0):
 
 | | ddfast | DDS | ratio |
 |---|---|---|---|
-| single problems (`tests/data/public.set`, 600 deals, SolveBoard; cycles per deal, 3 alternating runs) | 15.7-15.9M | 70.0-71.4M | 4.5x |
-| full tables (100 random deals, CalcDDtable on one thread) | 30.7 ms/table | 132.5 ms/table | 4.3x |
+| single problems (`tests/data/public.set`, 600 deals, SolveBoard; cycles per deal, 3 alternating runs) | 13.4-13.5M | 69.6-74.0M | 5.2x |
+| full tables (100 random deals, CalcDDtable on one thread; cycles per table) | 146M | 728M | 5.0x |
 
 Batches (`bench/bench_batch.cpp`: SolveAllBoards and CalcAllTables against `solve_parallel` and
 `solve_tables_parallel`, same deals, same thread count, best of 3; the 600 deals of the public
@@ -77,22 +77,24 @@ set and tables of its first 120):
 
 | | threads | ddfast | DDS | ratio |
 |---|---|---|---|---|
-| deals | 4 (CPUs 0-3) | 1,018 deals/s | 207 deals/s | 4.9x |
-| tables | 4 (CPUs 0-3) | 122.0 tables/s | 27.7 tables/s | 4.4x |
-| deals | 8 (CPUs 0-3, 12-15) | 1,419 deals/s | 272 deals/s | 5.2x |
-| tables | 8 (CPUs 0-3, 12-15) | 165.3 tables/s | 34.8 tables/s | 4.75x |
+| deals | 4 (CPUs 0-3) | 916 deals/s | 159 deals/s | 5.8x |
+| tables | 4 (CPUs 0-3) | 106.9 tables/s | 21.1 tables/s | 5.1x |
+| deals | 8 (CPUs 0-3, 12-15) | 1,320 deals/s | 230 deals/s | 5.7x |
+| tables | 8 (CPUs 0-3, 12-15) | 151.1 tables/s | 29.9 tables/s | 5.1x |
 
 ddfast pins one worker per CPU and hands out one problem at a time; DDS's pool is confined to
 the same CPUs with `taskset` but its threads are not pinned individually. A laptop's clock moves
-a lot under load (3.0-4.2 GHz here), so the cycle counts are the steadier figure.
+a lot under load (3.0-4.2 GHz here), so the cycle counts are the steadier figure; the batch
+rates above came from a slower run of the clock than earlier ones, and the ratios are the
+comparison.
 
 Positions with fewer cards are faster still, relative to DDS (random trick starts, one at a
-time, `bench_positions`): 4.3x DDS at 13 cards a hand, 4.8x at 10, 8x at 8, 13x
-at 7 and 58x at 5. Batches of small positions (`solve_positions`) gain another 1.2-1.5x.
+time, `bench_positions`): 5.7x DDS at 13 cards a hand, 4.8x at 10, 7.6x at 8, 12x
+at 7 and 48x at 5. Batches of small positions (`solve_positions`) gain up to another 1.25x.
 
 On one performance core of an Apple M5 (macOS; see "Code paths and the macOS port" below), against
 the same DDS built with the same compiler and flags, cycles per deal (min of 3 alternating
-runs):
+runs; measured before the bridge-solver techniques above, which take about 13% off):
 
 | | ddfast | DDS | ratio |
 |---|---|---|---|
@@ -104,27 +106,29 @@ most of the smaller ratio.
 
 ### Against bridge-solver
 
-[bridge-solver](https://github.com/BSalita/bridge-solver) (BSalita's fork of
-macroxue/bridge-solver, branch `faster-search`, commit `61a6e59`) is the solver BEN 0.9.0.4
+[bridge-solver](https://github.com/macroxue/bridge-solver) is Hanhong Xue's solver; the build
+measured here is Robert Salita's fork at branch `faster-search`, commit `61a6e59`
+([BSalita/bridge-solver](https://github.com/BSalita/bridge-solver)), the solver BEN 0.9.0.4
 ships and solves on by default. `bench/bench_libdds.cpp` calls it through its DDS-compatible
-library, on the same machine and deals as above, both the copy BEN ships (built for
-x86-64-v3) and one built here (`-march=native`, profile-guided); `bench/get_bsolver.sh` fetches
-both. Every answer agreed with ddfast's. The ratios are bridge-solver's cost over ddfast's;
-first BEN's copy, then the native build:
+library, on the same machine as above, both the copy BEN ships (built for x86-64-v3) and one
+built here (`-march=native`, profile-guided); `bench/get_bsolver.sh` fetches both. Every answer
+agreed with ddfast's. The ratios are bridge-solver's cost over ddfast's; first BEN's copy, then
+the native build:
 
 | | ddfast | bridge-solver (BEN's copy) | ratio (BEN's / native) | DDS ratio |
 |---|---|---|---|---|
-| full tables, one core (100 random deals, CalcDDtable; cycles per table) | 165M | 257M | 1.56x / 1.50x | 4.3x |
-| single problems, one core (public set, SolveBoard; cycles per deal) | 15.7M | 32.1M | 2.05x / 1.93x | |
-| table batches, 8 threads (500 random deals, CalcAllTables; thread-cycles per table) | 200M | 343-361M | 1.72-1.80x / 1.61-1.69x | |
-| BEN's workload, 8 threads (wall time, all batches) | | | 1.68x / 1.59x | 4.4-4.6x |
+| full tables, one core (100 random deals, CalcDDtable; cycles per table) | 143M | 258M | 1.81x / 2.04x | 5.2-5.4x |
+| single problems, one core (public set, SolveBoard; cycles per deal) | 13.6M | 31.8M | 2.34x / 2.29x | |
+| table batches, 8 threads (500 random deals, CalcAllTables; thread-cycles per table) | 176M | 340-342M | 1.93-1.94x / 1.82x | |
+| BEN's workload, 8 threads (wall time, all batches) | | | 1.66x / 1.55x | 4.4x |
 
 BEN's workload (`bench_libdds ... boards`): ten positions at each of four stages of play
 (trick 1, 4, 7 and 10), each a batch of 200 samples with the two hidden hands re-dealt, solved
 with `solutions` 1 and 3 through SolveAllBoards as BEN's `bsolver.py` calls it, against
 ddfast's DDS-compatible SolveBoard (the code behind the Python module's `solve_boards_pbn`) on
-as many threads. bridge-solver's cost is 1.6x ddfast's at trick 1, 1.5-2.2x at trick 4 and 2-3x
-at tricks 7 and 10.
+as many threads. bridge-solver's cost is 1.5-1.7x ddfast's at trick 1, 1.35-2.0x at trick 4,
+2.25-2.4x at trick 7 and 1.6-1.75x at trick 10. This workload gained little from the
+bridge-solver techniques above (1.68x / 1.59x before them), unlike tables and single problems.
 
 ## Requirements
 
@@ -395,6 +399,7 @@ sh bench/get_bsolver.sh                                    # bridge-solver: buil
 taskset -c 0 bin/bench_libdds build/ben-bsolver/libbsolver-dds.so tables 100   # vs ddfast and DDS, one core
 taskset -c 0-3,12-15 bin/bench_libdds build/ben-bsolver/libbsolver-dds.so boards 200 8 0-3,12-15  # BEN's workload
 sh bench/loo.sh OUTDIR                                     # the leave-one-out study (docs/LOO.md)
+sh bench/history.sh 3 start:03d1b25 pr21:8bd213a ...       # speed at past commits (docs/HISTORY.md)
 ```
 
 Every test and benchmark checks every answer against DDS. `tests/data/public.set` holds 600
@@ -417,6 +422,7 @@ random deals, each with a strain, a declarer and DDS's answer (format in `tests/
 | `tests/`, `bench/`, `tools/` | tests against DDS, benchmarks, the command |
 | `docs/NOTES.md` | design and measurements |
 | `docs/LOO.md` | what each part of the design is worth (leave-one-out study) |
+| `docs/HISTORY.md` | ddfast's speed over its main commits, re-measured with one program |
 | `docs/TABLES_NOTES.md` | the original design notes of the endgame tables |
 
 ## License
