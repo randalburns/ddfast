@@ -1674,3 +1674,77 @@ Tried for the same workload and not adopted (cycles per position, trick starts, 
 - Interleaved searches on one thread: 1 to 5% at 2 or 4 contexts, slower beyond.
 - Four threads on a batch of 32: 3.3x.
 
+
+## Round 20: every card's score natively, and play analysis (branch card-results-value-first, 2026-11-22)
+
+Round 19's method, taken to `ddfast::card_results` and `ddfast::analyse_play` (src/play.cpp),
+which still did a full solve per card and per step. Measured on an Apple M5, one thread, with
+`bench_cards 5 1 SEED 200` (new: positions reached by random legal play from random deals, a
+random strain and leader). For these figures the old method stayed in the code behind a
+switch, and old and new took turns in one process, the lowest of five rounds; the switch is
+removed again, and `bench_cards` now times the one method and prints a hash of every answer.
+
+`card_results` now depends on the cards already played to the trick:
+
+- At a lead: the position's value first, then each card is asked "at least that?" and one
+  less until yes (round 19's method). 65% of the cards (one per run of equal cards) score the
+  value, 25% one less, 7% two less, 4% less still: 1.4 to 1.55 questions a card and one
+  solve of the position, and half the calls to the solver (10 a card in place of 21 at 13
+  cards).
+- With one or two cards played: the first card is solved, and each later card is asked about
+  the best score so far, "at least that?", then one more until no, or one less until yes.
+  Here a full solve of a card halves the range 0 to the tricks left (2.6 questions at 5
+  cards, 3.8 at 13); the cards lie closer together than at a lead (80% score the best, 15%
+  one less, 3 to 4% two less), so 1.1 to 1.4 questions a card and 0.4 solves. The position's value first, as at a lead, is no
+  gain here (-5 to +14%): the value of a position in the middle of a trick is itself found
+  by questions about every card.
+- With three cards played: a full solve per card, as before. Each card ends the trick, so
+  each solve is a trick start with the solver's own first guess. From the best card so far:
+  -2 to -3% at 10 to 13 cards, 0 to -1% at 7 to 9, +3 to +5% at 5 and 6. The position's value first: +1 to
+  +54%.
+
+Cycles per call, before -> after (seed 1; the second figure is the change with seed 2). The
+last column is the same code twice, so it shows the noise:
+
+| cards a hand | at a lead | 1 card played | 2 played | 3 played (unchanged) |
+|---|---|---|---|---|
+| 13 | 47.00M -> 36.55M (-22%, -29%) | 9.68M -> 8.87M (-8%, -7%) | 9.22M -> 8.90M (-3%, -5%) | 7.45M -> 7.51M (+1%, 0%) |
+| 12 | 17.27M -> 13.53M (-22%, -22%) | 4.19M -> 3.88M (-7%, -7%) | 3.52M -> 3.32M (-6%, -5%) | 2.57M -> 2.58M (0%, 0%) |
+| 11 | 5.70M -> 4.46M (-22%, -20%) | 1.78M -> 1.66M (-6%, -7%) | 1.46M -> 1.39M (-5%, -5%) | 1.29M -> 1.29M (0%, +3%) |
+| 10 | 2.52M -> 1.99M (-21%, -21%) | 763.8k -> 726.9k (-5%, -7%) | 587.8k -> 554.9k (-6%, -5%) | 431.7k -> 430.2k (0%, 0%) |
+| 9 | 985.9k -> 788.0k (-20%, -20%) | 339.9k -> 310.3k (-9%, -6%) | 261.4k -> 260.5k (0%, -5%) | 195.4k -> 197.0k (+1%, 0%) |
+| 8 | 391.4k -> 326.8k (-16%, -20%) | 133.6k -> 123.7k (-7%, -7%) | 103.1k -> 97.5k (-5%, -5%) | 76.8k -> 77.2k (+1%, 0%) |
+| 7 | 159.7k -> 126.1k (-21%, -22%) | 58.2k -> 51.0k (-12%, -8%) | 42.1k -> 40.9k (-3%, -5%) | 29.6k -> 29.4k (0%, 0%) |
+| 6 | 65.9k -> 51.1k (-22%, -23%) | 23.0k -> 20.4k (-11%, -7%) | 16.6k -> 15.5k (-6%, -5%) | 9.28k -> 9.06k (-2%, -1%) |
+| 5 | 25.0k -> 18.6k (-26%, -26%) | 9.16k -> 8.20k (-10%, -11%) | 6.03k -> 5.40k (-10%, -9%) | 2.69k -> 2.62k (-3%, 0%) |
+
+300 positions a cell at 13 and 12 cards, 500, 1000, 2000 and 3000 at 11 to 8, 5000 below. The
+machine was shared: the five rounds of a cell mostly lie within 5%, the worst within 28%.
+
+`analyse_play`: after each card the total can only move against the side that played it, and
+mostly does not move, so each step asks about the previous total and one less (North-South
+played) or one more (East-West) until the answer changes, in place of a full solve of every
+step. 200 deals of 52 cards, cycles a deal, two seeds: random play (the total changes 8 times
+a deal) 25.3M -> 23.4M (-8%) and 23.8M -> 21.4M (-10%); nine cards in ten one of the best
+(0.8 changes) 18.6M -> 16.0M (-14%) and 19.4M -> 17.1M (-12%); every card one of the best
+24.6M -> 21.5M (-13%) and 20.8M -> 18.2M (-12%). The solver is called 2.7 to 3.1 times a card
+in place of 6.5 to 7; the time falls by much less than the calls.
+
+Every `card_results` answer and every `analyse_play` total was the same old and new on all the
+benchmark positions (88,400 positions and 600 deals a seed, three seeds), and `test_play 1000
+1` agrees with DDS.
+
+Tried and not adopted:
+
+- At a lead, a search of 0 to value - 2 by halves after two "no" answers, in place of going
+  on down one trick at a time: 0 to 1.5% slower, with 0.05 to 0.1 more questions a card (a
+  fifth of the positions, two rounds). Only 4% of the cards are three or more below, and
+  halving costs more for the 7% that are exactly two below.
+- A first guess for a position in the middle of a trick (finish the trick with each hand's
+  first legal card, solve that trick start, then go up or down from there) in place of
+  halving the range, in the old method: 1 to 16% slower at 8 to 13 cards, 5 to 20% faster at
+  5 and 6 (a fifth of the positions, two rounds).
+
+Not tried: the first target of a trick-start solve set from the best card so far (for three
+cards played; the solver takes one, but play.cpp's interface to it does not pass it on), and
+the from-the-best-so-far method in the DDS layer's `solutions` 3 in the middle of a trick.
