@@ -24,6 +24,8 @@ void solve_positions(const ddcore::Position* positions, size_t n, uint8_t* trick
 void solve_tables_interleaved(const uint16_t* const* hands, uint8_t* const* out, size_t n, int nctx);
 // tricks[strain][declarer]: declarer's side's tricks (DDS's res_table layout).
 void solve_table(const uint16_t hand[4][4], uint8_t tricks[5][4]);
+// Rows s0 .. s1 - 1 (strains) of the same table only.
+void solve_table_strains(const uint16_t hand[4][4], int s0, int s1, uint8_t tricks[5][4]);
 
 // One deal (13 cards a hand) searched on the calling thread and helpers on cpus[1..ncpu)
 // (par_deal.cpp); North-South's tricks. lead_nodes: lead nodes searched by all threads.
