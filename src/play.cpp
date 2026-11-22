@@ -131,6 +131,21 @@ int value_play(Play& s) {
   return lo;
 }
 
+// A kept table from another deal pays only below this many cards a hand. Worlds that share one
+// or two hands (a player's samples of the hidden hands) rarely meet the same patterns again at
+// 12 and 13 cards, and a fuller table then costs more than it saves: with the table kept at
+// every size, the single-dummy-bridge harness's batches of 32 worlds took 16.2 s at 13 cards and
+// 8.4 s at 12; not kept, 15.0 and 8.1 s. From 11 cards down keeping wins (3.12 against 3.34 s
+// at 11). Thresholds 9 to 13 tried there; 12 was best (docs/NOTES.md).
+#ifndef KEEP_OTHER_DEAL_BELOW
+#define KEEP_OTHER_DEAL_BELOW 12
+#endif
+
+// The cards each seat held at the previous call on this thread (its hand and its card on the
+// table): a position is of the same deal exactly when every seat holds a subset of them.
+thread_local uint16_t g_prev[4][4];
+thread_local bool g_prev_set = false;
+
 // Checks p and fills s; false if p is not a valid position.
 bool load(const PlayPosition& p, bool keep, Play& s) {
   if (p.trump > 4 || p.leader > 3 || p.played > 3) return false;
@@ -154,7 +169,19 @@ bool load(const PlayPosition& p, bool keep, Play& s) {
   memcpy(s.h, p.hand, sizeof s.h);
   s.trump = p.trump, s.leader = p.leader, s.played = p.played;
   for (int i = 0; i < p.played; i++) s.tr[i] = p.trick[i];
-  s.keep = keep;
+  uint16_t held[4][4];
+  memcpy(held, p.hand, sizeof held);
+  for (int i = 0; i < p.played; i++) {
+    uint16_t& x = held[(p.leader + i) & 3][p.trick[i].suit];
+    x = uint16_t(x | bit(p.trick[i]));
+  }
+  bool same_deal = g_prev_set;
+  for (int q = 0; q < 4 && same_deal; q++)
+    for (int x = 0; x < 4; x++)
+      if (held[q][x] & ~g_prev[q][x]) { same_deal = false; break; }
+  memcpy(g_prev, held, sizeof held);
+  g_prev_set = true;
+  s.keep = keep && (same_deal || k < KEEP_OTHER_DEAL_BELOW);
   return true;
 }
 

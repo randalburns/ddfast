@@ -145,6 +145,10 @@ int main(int argc, char** argv) {
           wrong++, fprintf(stderr, "deal %d card %d: card %d/%d gives %d, DDS %d\n", d, i, cr[j].card.suit, cr[j].card.rank,
                            cr[j].ns_tricks, want_card[cr[j].card.suit][cr[j].card.rank - 2]);
       }
+      // The same position again with the table kept (the same deal, so kept at any size).
+      CardResult kept[13];
+      if (card_results(p, kept, true) != nc || memcmp(kept, cr, size_t(nc) * sizeof(CardResult)))
+        wrong++, fprintf(stderr, "deal %d card %d: card_results differs with the table kept\n", d, i);
       checked++;
       break;
     }
