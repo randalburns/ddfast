@@ -1808,3 +1808,47 @@ Exactness: `test_ddfast quick` and `tables 300 5` (solve_table, solve_tables,
 solve_tables_parallel) all exact; the hash of 600 tables is the same before and after on 4
 and 10 threads at each batch size.
 
+## Round 22: a kept table from another deal, only below 12 cards (branch keep-table-by-size, 2026-11-22)
+
+`keep_table` serves two uses: later positions of one deal, and other deals in the same strain
+that share a hand or two (a player's samples of the hidden hands, solved as a batch). For the
+second, keeping loses at 12 and 13 cards a hand.
+
+**The single-dummy-bridge harness** (its recorded all-moves batches from a 12-board run: 8,991
+`card_results` batches, 182,203 worlds, mostly 32 worlds sharing two hands; best of 3 passes,
+six thresholds at once, seconds with the table kept below N cards):
+
+| cards | always | <13 | <12 | <11 | <10 |
+|---|---|---|---|---|---|
+| 13 | 16.21 | 14.97 | 14.98 | 15.04 | 15.45 |
+| 12 | 8.40 | 8.68 | 8.07 | 8.17 | 8.43 |
+| 11 | 3.16 | 3.16 | 3.12 | 3.34 | 3.43 |
+| all | 31.06 | 30.12 | 29.48 | 29.92 | 30.87 |
+
+Below 12 is best there: 5.1% less time. 79% of that workload's time is at 12 and 13 cards.
+
+**`bench_cards`, related worlds** (new section: batches of 32 trick starts sharing two hands,
+the other two dealt again at random; cycles per world, kept against not kept, with
+`-DKEEP_OTHER_DEAL_BELOW=14` so that the table is kept at every size): 13 cards +32.2%,
+12 +27.2%, 11 +21.5%, 10 +9.8%, 9 +1.6%, 8 -6.8%.
+
+The two agree at 12 and 13 cards and disagree below: the harness's worlds, sampled to fit the
+bidding, gain from the table at 11 cards and fewer, and random redeals do not until 8. Not
+explained further (no world is repeated within a harness batch). So the rule covers only what
+both show, and below 12 cards the caller's `keep_table` is honoured as before.
+
+**The rule** (`load()` in `play.cpp`, so `solve_play`, `at_least` and `card_results`): the
+previous call's cards per seat are remembered per thread. When every seat holds a subset of
+them, the position is the same deal further on and the table is kept at any size; otherwise it
+is kept only below `KEEP_OTHER_DEAL_BELOW` (12) cards a hand. A position of the same deal on
+another line of play (a seat holding a card it had played before) counts as another deal.
+`solve_position()` is unchanged.
+
+Result on the harness's batches with its wrapper passing `keep_table` for every world after a
+batch's first: 28.62 -> 27.18 s (-5.0%), the same as the wrapper's own size rule on `main`
+(27.41 s); identical scores in all 8,991 batches.
+
+Exactness: `test_ddfast quick` all exact; `test_play 300 1` and `200 7` agree with DDS, with a
+new check that `card_results` gives the same with the table kept; `bench_cards` fails if a
+related-worlds batch answers differently with `keep_table` true and false (hash
+`3fa26005a895bf4c` with either threshold).

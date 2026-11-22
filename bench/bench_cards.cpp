@@ -11,6 +11,14 @@
 // heads a call (a head is the first of a run of equal cards) and how far the heads fall below
 // the best card, and at the end a hash of every answer, to compare two builds. One thread
 // (pin it: taskset -c 0 ...).
+//
+// Related worlds (last): batches of 32 positions at a trick start that share the hands of the
+// seat to play and one other seat, the other two hands dealt again each time (a player's
+// samples of the hidden hands), 13 down to 8 cards a hand; SCALE times 10, 10, 15, 30, 60 and
+// 100 batches. Each batch is timed with keep_table false and with it true after the batch's
+// first world. From another deal the library keeps the table only below 12 cards a hand, so
+// the two agree from 12 up; build with -DKEEP_OTHER_DEAL_BELOW=14 to time it kept at every
+// size.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -93,6 +101,23 @@ struct Game {
   ddfast::Position start;
   Card seq[52];
 };
+
+// p with the two hands other than the seat to play's and `fixed`'s dealt again (a trick start).
+PlayPosition another_world(const PlayPosition& p, int fixed) {
+  PlayPosition w = p;
+  int seat[2], ns = 0, cards[26], nc = 0, len[2] = {0, 0};
+  for (int q = 0; q < 4; q++)
+    if (q != to_play(p) && q != fixed) seat[ns++] = q;
+  for (int k = 0; k < 2; k++)
+    for (int x = 0; x < 4; x++) {
+      for (int r = 0; r < 13; r++)
+        if (p.hand[seat[k]][x] >> r & 1) cards[nc++] = x * 13 + r, len[k]++;
+      w.hand[seat[k]][x] = 0;
+    }
+  std::shuffle(cards, cards + nc, rng);
+  for (int i = 0; i < nc; i++) w.hand[seat[i < len[0] ? 0 : 1]][cards[i] / 13] |= uint16_t(1u << (cards[i] % 13));
+  return w;
+}
 
 uint64_t g_hash = 1469598103934665603ull;
 void mix(const void* p, size_t n) {
@@ -193,6 +218,43 @@ int main(int argc, char** argv) {
            deals, pc, double(moves) / deals, double(lo) / deals, 100.0 * (double(hi) / double(lo) - 1));
     fflush(stdout);
   }
-  printf("%ld card_results positions; hash of every answer %016llx%s\n", calls, (unsigned long long)g_hash, bad ? "  (analyse_play FAILED)" : "");
+  static const int batches[14] = {0, 0, 0, 0, 0, 0, 0, 0, 100, 60, 30, 15, 10, 10};
+  const int W = 32;
+  if (scale > 0) printf("related worlds, batches of %d sharing two hands: cycles per world, keep_table false; true (spread)\n", W);
+  for (int size = 13; size >= 8 && scale > 0; size--) {
+    const int nb = std::max(2, int(batches[size] * scale));
+    std::vector<PlayPosition> ps(size_t(nb) * W);
+    for (int b = 0; b < nb; b++) {
+      PlayPosition p = deal();
+      for (int i = 0; i < (13 - size) * 4; i++) apply(p, random_card(p));
+      const int fixed = (to_play(p) + 1 + int(rng() % 3)) & 3;
+      ps[size_t(b) * W] = p;
+      for (int i = 1; i < W; i++) ps[size_t(b) * W + i] = another_world(p, fixed);
+    }
+    std::vector<Out> out(ps.size()), ref(ps.size());
+    long long best[2];
+    double spread[2];
+    for (int keep = 0; keep < 2; keep++) {
+      long long lo = -1, hi = 0;
+      for (int r = 0; r <= rounds; r++) {  // the first pass is not timed
+        for (auto& x : out) memset(&x, 0, sizeof x);
+        const long long c0 = positions::cycles_read(fc);
+        for (size_t i = 0; i < ps.size(); i++) out[i].n = ddfast::card_results(ps[i], out[i].c, keep && i % W != 0);
+        const long long c = positions::cycles_read(fc) - c0;
+        if (r == 0) continue;
+        if (lo < 0 || c < lo) lo = c;
+        hi = std::max(hi, c);
+      }
+      best[keep] = lo, spread[keep] = 100.0 * (double(hi) / double(lo) - 1);
+      if (keep == 0) ref = out;
+      else if (memcmp(ref.data(), out.data(), out.size() * sizeof(Out))) bad++;  // the same answers either way
+    }
+    for (auto& o : out) mix(&o, sizeof o);
+    calls += long(ps.size());
+    printf("%2d cards, %3d batches: %9.0f (%4.1f%%); %9.0f (%4.1f%%)  %+5.1f%%\n", size, nb, double(best[0]) / ps.size(), spread[0],
+           double(best[1]) / ps.size(), spread[1], 100.0 * (double(best[1]) / double(best[0]) - 1));
+    fflush(stdout);
+  }
+  printf("%ld card_results positions; hash of every answer %016llx%s\n", calls, (unsigned long long)g_hash, bad ? "  (analyse_play or related worlds FAILED)" : "");
   return bad != 0;
 }

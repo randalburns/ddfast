@@ -103,7 +103,12 @@ struct PlayPosition {
 };
 
 // North-South's tricks from p on, the current trick included, with best play; -1 if p is not a
-// valid position. keep_table as for solve_position().
+// valid position. keep_table as for solve_position(), with one difference for solve_play(),
+// at_least() and card_results(): the table is always kept when p is the previous call's deal
+// further on (every seat holds a subset of what it held then), but from another deal it is kept
+// only below 12 cards a hand. Worlds that share a hand or two (samples of the hidden hands)
+// reuse little of each other's table at 12 and 13 cards, and it then costs more than it saves.
+// So a caller can pass true through a whole batch of related worlds in one strain.
 int solve_play(const PlayPosition& p, bool keep_table = false);
 
 // 1 if North-South take at least `target` tricks from p on (the current trick included), 0 if
