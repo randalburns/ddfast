@@ -40,9 +40,10 @@ by 1% or more are kept; the others are listed below the table.
 | #6 | `4eda109` | Faster table directory, micro-optimizations, dead code removed | 14.00 (34.05) | 158.1 (376.5) | 4.70x / 4.48x |
 | #11 | `157e688` | Full tables: first questions from the same deal's other declarers | 13.87 (34.05) | 155.5 (371.1) | 4.75x / 4.56x |
 | #21 | `8bd213a` | bridge-solver's sure-trick bounds and cut-off cards | 12.08 (30.83) | 130.4 (321.1) | 5.45x / 5.44x |
+| #25 | `af908de` | Cut-off cards only from 8 cards a hand | 11.68 (30.39) | 122.6 (319.2) | 5.64x / 5.78x |
 
-From the start to #21: 17% fewer cycles per problem (15% fewer instructions) and 21% fewer per
-table (20% fewer instructions).
+From the start to #25: 20% fewer cycles per problem (17% fewer instructions) and 26% fewer per
+table (21% fewer instructions).
 
 - **#1 and #2** each take 1.5-2.6% of the instructions. Their cycles move less than that, within
   the 2% the clock allows.
@@ -51,8 +52,13 @@ table (20% fewer instructions).
 - **#11** changes full tables only: 1.4% fewer instructions, 2% fewer cycles.
 - **#21** is the largest step: 10% fewer instructions per problem and 14% per table, and 13-16%
   fewer cycles (24% fewer nodes on the public set).
+- **#25** saves cache misses rather than work: 1.4% fewer instructions per problem and 0.6% per
+  table, but 3.4% and 4.3% fewer cycles than #21 measured alongside it (12.09M and 128.1M that
+  day). Small searches no longer probe the 512 KB cut-off table.
 
-Left out (instructions within 1% of the point before): #5 (the check builds), #7 (AVX-512 and
+Left out (instructions within 1% of the point before): #24 (every card's score at a lead, in
+the DDS-compatible SolveBoard, which this workload does not call: the instructions of #21),
+#5 (the check builds), #7 (AVX-512 and
 Highway as two code paths: exactly the instructions of #5, so the Highway path costs the
 AVX-512 code nothing), #8 (CI), #10 (tables folded into ddfast), #16 (opt-in mapping of the
 table files) and #19 (the 4-card table with all four suits sorted at no trumps: +0.5% here; it
@@ -72,7 +78,8 @@ per second; the rounds after brought it to about 4 times DDS. The repository's f
 
 ```sh
 export DDFAST_TABLES=/path/to/tables
-sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr11:157e688 pr21:8bd213a
+sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr11:157e688 pr21:8bd213a \
+  pr25:af908de
 ```
 
 Commits before #10 need ddclaim's checkout for their `extern/ddclaim` (`DDCLAIM_REPO`,
