@@ -66,8 +66,8 @@ table files) and #19 (the 4-card table with all four suits sorted at no trumps: 
 mostly shrinks the table file, 540 MB against 836 MB). The PRs are numbered by when they were
 opened, not merged: #7 and #8 reached `main` before #6. #28 (switches for the bounds and the
 cut-off cards at run time), #29 and #30 (table batches hand out single strains, for small
-batches: NOTES round 21) are not measured here; on the M5 #28 and #30 are within 1.2% of #25
-on this workload.
+batches: NOTES round 21), #31 and #32 are not measured here; on the M5 #28 to #32 are within
+1.5% of #25 on this workload.
 
 ## On an Apple M5
 
@@ -196,6 +196,10 @@ Every card's result at a lead, `card_results`:
 - **One best card at a lead** (`solutions` 1) follows the positions: -9% at 11 cards, -3% at
   10, nothing below.
 - **#28** costs under 1% here.
+- **#31 and #32** (a table kept from another deal, `keep_table`, used only below a size; an
+  option, off by default, since #32) change nothing here: every cell of 9 cards or more is
+  within 1.6% of #29 at both, and full deals keep the instructions of #30. None of these
+  calls keeps a table from another deal.
 
 ## Before git
 
