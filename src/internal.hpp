@@ -31,6 +31,13 @@ int solve_deal_parallel(const ddcore::Position& p, const int* cpus, int ncpu, un
 void stop_deal_pool();
 unsigned long long lead_nodes();         // lead nodes searched on the calling thread (all builds)
 unsigned long long nodes();              // nodes searched, lead and follow (STATS builds; otherwise 0)
+#ifndef CUTC_MIN
+#define CUTC_MIN 8  // cut-off cards from 8 cards a hand (solver.cpp, NOTES round 18)
+#endif
+// Options (set_options), read in the search: hidden, so a PIC build reads them directly, not
+// through the GOT.
+extern bool g_sure_trick_bounds __attribute__((visibility("hidden")));  // Options::sure_trick_bounds
+extern int g_cutoff_min __attribute__((visibility("hidden")));  // cut-off cards from this many cards a hand; 14: never
 extern const uint8_t* g_first_target;    // development: per position, the first target (0: the usual guess)
 
 }  // namespace ddfast::detail
