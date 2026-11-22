@@ -2388,8 +2388,12 @@ struct STPrint { ~STPrint() { fprintf(stderr, "selftest checks %llu\n", (unsigne
 #ifndef CUTC
 #define CUTC 1
 #endif
+// From 8 cards a hand: below that a search is small, and probing the table (often a cache miss)
+// costs more than the better order saves. Full deals, best of 3 (NOTES round 18): 4 cards
+// 13.67M cycles a problem and 132.0M a table, 6: 13.57M and 130.3M, 8: 13.13M and 126.9M,
+// 10: 13.75M and 131.3M.
 #ifndef CUTC_MIN
-#define CUTC_MIN 4
+#define CUTC_MIN 8
 #endif
 #ifndef CUTF
 #define CUTF 1
