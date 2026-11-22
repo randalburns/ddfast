@@ -206,6 +206,18 @@ void stop_pool();
 // Pins the calling thread to one CPU; false if that fails.
 bool pin_thread(int cpu);
 
+// Two techniques from bridge-solver (Hanhong Xue; README), both on by default. They help single
+// solves and full tables (24% fewer nodes, 13% fewer cycles), but cost card_results() with a kept
+// table about 6% more cycles and 8% more instructions (the harness's all-moves batches), all of
+// it from the cut-off cards. Process-wide: set before solving, not while another thread solves. Answers are the same
+// either way; only the work changes.
+struct Options {
+  bool sure_trick_bounds = true;  // bs_bounds() after DDS's quick and later tricks
+  bool cutoff_cards = true;       // the card that last cut off, tried first (from 8 cards a hand)
+};
+void set_options(const Options& options);
+Options options();
+
 // Nodes searched so far (lead and follow nodes, all threads) in a build with -DSTATS, which
 // also prints search counters at exit: a fingerprint of the search's behaviour (the counter is
 // not atomic, so count on one thread). 0 in other builds.

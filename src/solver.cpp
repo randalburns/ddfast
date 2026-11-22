@@ -38,7 +38,11 @@
 #include "internal.hpp"
 
 #ifndef DDF_PAR
-namespace ddfast::detail { const uint8_t* g_first_target; }
+namespace ddfast::detail {
+const uint8_t* g_first_target;
+bool g_sure_trick_bounds = true;
+int g_cutoff_min = CUTC_MIN;  // set_options() writes CUTC_MIN or 14
+}
 #endif
 
 namespace {
@@ -2392,9 +2396,7 @@ struct STPrint { ~STPrint() { fprintf(stderr, "selftest checks %llu\n", (unsigne
 // costs more than the better order saves. Full deals, best of 3 (NOTES round 18): 4 cards
 // 13.67M cycles a problem and 132.0M a table, 6: 13.57M and 130.3M, 8: 13.13M and 126.9M,
 // 10: 13.75M and 131.3M.
-#ifndef CUTC_MIN
-#define CUTC_MIN 8
-#endif
+#define CUT_FROM (ddfast::detail::g_cutoff_min)  // CUTC_MIN, or 14 with cut-off cards off
 #ifndef CUTF
 #define CUTF 1
 #endif
@@ -2560,7 +2562,7 @@ bool lead(int n, int L, int target, u64& R) {
       return value;
     }
 #if BSB
-    if (bs_bounds<NT>(n, L, target, all, R, value)) {
+    if (ddfast::detail::g_sure_trick_bounds && bs_bounds<NT>(n, L, target, all, R, value)) {
       STAT(g_bsb++);
       tt_store(R, value, 0);
       return value;
@@ -2675,9 +2677,10 @@ bool lead(int n, int L, int target, u64& R) {
     }
   }
 #if CUTC
-  const u64 cuth = n >= CUTC_MIN ? cut_hash_lead<NT>(L, target) : 0;
+  const bool usec = n >= CUT_FROM;
+  const u64 cuth = usec ? cut_hash_lead<NT>(L, target) : 0;
   CutEntry& cute = g_cut[cuth >> (64 - CUT_BITS)];
-  if (n >= CUTC_MIN && cute.tag == uint32_t(cuth)) {
+  if (usec && cute.tag == uint32_t(cuth)) {
     const u64 cc = 1ull << cute.card;
     if (cc & cand)
       for (int i = 0; i < 16; i++)
@@ -2726,7 +2729,7 @@ bool lead(int n, int L, int target, u64& R) {
       bestc = c;
       S->killer[n][0] = c;
 #if CUTC
-      if (n >= CUTC_MIN) cute = {uint32_t(cuth), uint8_t(__builtin_ctzll(c))};
+      if (usec) cute = {uint32_t(cuth), uint8_t(__builtin_ctzll(c))};
 #endif
       STAT(g_tried[0]++);
       STAT(g_first[0] += tried == 1);
@@ -3016,7 +3019,7 @@ bool follow(int n, int L, int target, u64 all, u64 lane, u64 best, int bw, bool 
     }
   }
 #if CUTC && CUTF
-  const bool usec = n >= CUTC_MIN && (cand & (cand - 1));
+  const bool usec = n >= CUT_FROM && (cand & (cand - 1));
   const u64 cuth = usec ? cut_hash_follow<NT>(K, L, s, all, lane, in_suit, best, bw, target) : 0;
   CutEntry& cute = g_cut[cuth >> (64 - CUT_BITS)];
   u64 forced = (usec && cute.tag == uint32_t(cuth)) ? (1ull << cute.card) & cand : 0;

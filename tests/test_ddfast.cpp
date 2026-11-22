@@ -1,6 +1,6 @@
 // Exactness tests against DDS (extern/dds). Every answer ddfast gives is compared with DDS's.
 //
-// usage: test_ddfast [command] [--cpus LIST]
+// usage: test_ddfast [command] [--cpus LIST] [--no-bounds] [--no-cutoff]
 //   quick (default)    the public set, 100 random deals, 10 random tables, each also in parallel
 //   set FILE           a test set with answers (tests/data/public.set, or one from make_ref)
 //   random N SEED      N random problems (the referee's dealing), DDS SolveBoard as reference
@@ -9,7 +9,8 @@
 // Problems are checked with solve() on this thread, then with solve_parallel() on LIST (default:
 // available_cpus()), then one at a time with solve_deal_parallel() on the first N of LIST
 // (--deal-threads N, default 8). Exit status 0 if everything is exact. The tables are loaded from
-// $DDFAST_TABLES (default build/tables), built there first if missing.
+// $DDFAST_TABLES (default build/tables), built there first if missing. --no-bounds and
+// --no-cutoff turn off the sure-trick bounds and the cut-off cards (ddfast::set_options).
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -123,13 +124,17 @@ int test_tables(size_t n, unsigned long long seed) {
 int main(int argc, char** argv) {
   std::vector<std::string> args;
   std::string cpus = "auto";
+  ddfast::Options opts;
   for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "--cpus") && i + 1 < argc) cpus = argv[++i];
+    if (!strcmp(argv[i], "--no-bounds")) opts.sure_trick_bounds = false;
+    else if (!strcmp(argv[i], "--no-cutoff")) opts.cutoff_cards = false;
+    else if (!strcmp(argv[i], "--cpus") && i + 1 < argc) cpus = argv[++i];
     else if (!strcmp(argv[i], "--deal-threads") && i + 1 < argc) g_deal_threads = size_t(atol(argv[++i]));
     else args.push_back(argv[i]);
   }
   const std::string cmd = args.empty() ? "quick" : args[0];
   auto arg = [&](size_t k, const char* dflt) { return args.size() > k ? args[k] : std::string(dflt); };
+  ddfast::set_options(opts);
   SetMaxThreads(1);
   init_or_exit();
   g_cpus = parse_cpus(cpus);
