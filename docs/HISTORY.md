@@ -1,60 +1,63 @@
 # ddfast's speed over its history
 
-How ddfast's own speed changed across its main commits, on Linux x86-64 with the AVX-512 code,
-measured with one program at every point. [NOTES.md](NOTES.md) has the reasoning and the full
-measurements behind each step.
+How ddfast's own speed changed across the commits that moved it, on Linux x86-64 with the
+AVX-512 code, measured with one program at every point. [NOTES.md](NOTES.md) has the reasoning
+and the full measurements behind each step.
 
 ## Method
 
 - **Machine:** AMD Ryzen AI 9 HX 370 (Zen 5) laptop, AC power, performance profile; one
   thread pinned to CPU 0, a fast core. Each library built for this machine (`-march=native`,
   so the AVX-512 code).
-- **Workload (light):** 100 random problems (a deal, a strain and a declarer, solved as
-  SolveBoard is: one question set per problem) and 100 random full deals (`solve_table`, all
-  20 results). The same deals at every point (`random_problems(100, 1)` and
-  `random_deals(100, 1)` of `tests/common.hpp`).
-- **Measure:** user-mode cycles per problem and per table, from hardware counters, which
-  vary far less than time on a laptop whose clock moves between 3.0 and 4.2 GHz. Each run
-  keeps the best of 3 passes; three runs at each point, alternating over all points, and the
-  table gives the lowest. At this size, differences under about 3% are within the noise.
+- **Workload:** 300 random problems (a deal, a strain and a declarer, solved as SolveBoard is)
+  and 300 random full deals (`solve_table`, all 20 results), the same deals at every point
+  (`random_problems(300, 7)` and `random_deals(300, 7)` of `tests/common.hpp`).
+- **Measure:** user-mode cycles per problem and per table, from hardware counters; the best
+  of 3 passes in each run, three runs at each point alternating over all points, and the
+  table gives the lowest. Cycles still move by about 2% between runs on a laptop whose clock
+  swings between 3.0 and 4.2 GHz, so the instructions executed are counted too: they are
+  exact and repeat to the last digit, and decide whether a step changed the work.
 - **One program for every commit:** `bench/bench_history.cpp` uses only the public API
   (`init`, `solve`, `solve_table`), which has not changed since the first commit, and is
   linked to each commit's own library.
-- **Same answers everywhere:** a hash of all 100 answers and 100 tables is identical at every
-  point, and `test_ddfast random 100 1` and `tables 100 1` check those answers against DDS.
+- **Same answers everywhere:** a hash of all 300 answers and 300 tables is identical at every
+  point, and the current code's answers agree with DDS (`bin/test_ddfast`).
 - **Tables:** every point reads the same endgame-table files (the 4-card table as `p4_v5`
   up to #16, `p4_v6` from #19, both filled on this machine).
-- **DDS** (commit 5caf076e, same compiler and flags) on the same workload: 88.1M cycles per
-  problem, 728M per table.
+- **DDS** (commit 5caf076e, same compiler and flags) on the same workload: 65.9M cycles per
+  problem, 709M per table.
 
 ## Results
 
-| Point | Commit | Change | Problem (M cycles) | Table (M cycles) | vs DDS (problem / table) |
+Points in the order they reached `main`. Only the steps that changed instructions or cycles
+by 1% or more are kept; the others are listed below the table.
+
+| Point | Commit | Change | Problem: M cycles (M instructions) | Table: M cycles (M instructions) | vs DDS (problem / table) |
 |---|---|---|---|---|---|
-| start | `03d1b25` | The solver as it entered git (rounds 1-15 of NOTES behind it) | 19.14 | 175.5 | 4.60x / 4.15x |
-| #1 | `8aee46d` | `solve_position` (any trick start) | 18.91 | 173.8 | 4.66x / 4.19x |
-| #2 | `5661a1d` | ddclaim inside ddfast, cut to the 2-, 3- and 4-card tables | 18.04 | 171.3 | 4.88x / 4.25x |
-| #6 | `4eda109` | Faster table directory, micro-optimizations, dead code removed | 17.31 | 167.3 | 5.09x / 4.35x |
-| #7 | `4b2f7c2` | AVX-512 and Highway as two code paths | 18.01 | 172.5 | 4.89x / 4.22x |
-| #8 | `8d4c21a` | CI (no solver change) | 18.26 | 176.8 | 4.82x / 4.12x |
-| #10 | `f8319fa` | Endgame tables folded into ddfast; ddclaim removed | 17.60 | 168.8 | 5.01x / 4.31x |
-| #11 | `157e688` | Full tables: first questions from the same deal's other declarers | 17.41 | 161.3 | 5.06x / 4.51x |
-| #16 | `702b50b` | Opt-in mapping of the table files (off by default) | 17.34 | 164.0 | 5.08x / 4.44x |
-| #19 | `58c41aa` | 4-card table with all four suits sorted at no trumps (`p4_v6`) | 17.48 | 169.4 | 5.04x / 4.30x |
-| #21 | `8bd213a` | bridge-solver's sure-trick bounds and cut-off cards | 15.26 | 146.0 | 5.77x / 4.99x |
+| start | `03d1b25` | The solver as it entered git (rounds 1-15 of NOTES behind it) | 14.54 (36.48) | 165.1 (403.1) | 4.53x / 4.29x |
+| #1 | `8aee46d` | `solve_position` (any trick start) | 14.43 (35.94) | 167.3 (397.7) | 4.56x / 4.24x |
+| #2 | `5661a1d` | ddclaim inside ddfast, cut to the 2-, 3- and 4-card tables | 14.47 (35.05) | 162.0 (387.5) | 4.55x / 4.38x |
+| #6 | `4eda109` | Faster table directory, micro-optimizations, dead code removed | 14.00 (34.05) | 158.1 (376.5) | 4.70x / 4.48x |
+| #11 | `157e688` | Full tables: first questions from the same deal's other declarers | 13.87 (34.05) | 155.5 (371.1) | 4.75x / 4.56x |
+| #21 | `8bd213a` | bridge-solver's sure-trick bounds and cut-off cards | 12.08 (30.83) | 130.4 (321.1) | 5.45x / 5.44x |
 
-From the start to #21: 20% fewer cycles per problem and 17% fewer per table.
+From the start to #21: 17% fewer cycles per problem (15% fewer instructions) and 21% fewer per
+table (20% fewer instructions).
 
-- **#2 and #6** are the gains before #21 (about 4% each on problems). #6's NOTES figure on the
-  public set was -3.5%.
-- **#7** looks about 4% slower than #6, partly recovered by #10. It reorganised the vector
-  code into two paths; the difference is near the noise of this light test, and #8 (no solver
-  change) is as slow as #7, so code layout is a likely part of it.
-- **#11** speeds up full tables only (-4% here; NOTES: about -2% per table).
-- **#1, #8 and #16** change no search code; their differences are noise. **#19** mostly
-  shrinks the 4-card table (540 MB against 836 MB); NOTES measured -0.3% nodes and -0.5%
-  cycles on the M5.
-- **#21** is the largest single step: 24% fewer nodes on the public set, 13% fewer cycles.
+- **#1 and #2** each take 1.5-2.6% of the instructions. Their cycles move less than that, within
+  the 2% the clock allows.
+- **#6** takes 3% of the instructions and about 3.5% of the cycles (NOTES: -3.5% on the public
+  set).
+- **#11** changes full tables only: 1.4% fewer instructions, 2% fewer cycles.
+- **#21** is the largest step: 10% fewer instructions per problem and 14% per table, and 13-16%
+  fewer cycles (24% fewer nodes on the public set).
+
+Left out (instructions within 1% of the point before): #5 (the check builds), #7 (AVX-512 and
+Highway as two code paths: exactly the instructions of #5, so the Highway path costs the
+AVX-512 code nothing), #8 (CI), #10 (tables folded into ddfast), #16 (opt-in mapping of the
+table files) and #19 (the 4-card table with all four suits sorted at no trumps: +0.5% here; it
+mostly shrinks the table file, 540 MB against 836 MB). The PRs are numbered by when they were
+opened, not merged: #7 and #8 reached `main` before #6.
 
 ## Before git
 
@@ -62,16 +65,15 @@ The solver entered git (`03d1b25`) after fifteen rounds of work recorded in NOTE
 not separate commits and are not re-measured here. As NOTES records them on the public set:
 round 1 was correct at 13 cards but 6 times slower than DDS; round 2 replaced the
 transposition table and was already faster than DDS; rounds 3 and 4 reached 131 and 190 deals
-per second; the rounds after brought it to about 4 times DDS. The first commit's own,
+per second; the rounds after brought it to about 4 times DDS. The repository's first commit,
 `c925d49`, is ddclaim's history (the endgame-table project, merged in with #2), not ddfast's.
 
 ## Reproducing
 
 ```sh
 export DDFAST_TABLES=/path/to/tables
-sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr07:4b2f7c2 \
-  pr08:8d4c21a pr10:f8319fa pr11:157e688 pr16:702b50b pr19:58c41aa pr21:8bd213a
+sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr11:157e688 pr21:8bd213a
 ```
 
 Commits before #10 need ddclaim's checkout for their `extern/ddclaim` (`DDCLAIM_REPO`,
-default `../ddclaim`).
+default `../ddclaim`). `N` and `SEED` choose the workload (default 300 and 7).

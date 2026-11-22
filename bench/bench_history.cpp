@@ -1,8 +1,9 @@
 // bench_history: one thread, ddfast's public API only (init, solve, solve_table), so the same
 // program measures every commit: user-mode cycles per problem (random deals, a strain and a
 // declarer, as tests/common.hpp's random_problems) and per full table (random_deals), best
-// of `reps` passes, and a hash of every answer.
-//   bench_history [n=100] [seed=1] [reps=3]
+// of `reps` passes, the instructions of the last pass (exact, unlike cycles), and a hash of
+// every answer.
+//   bench_history [n=100] [seed=1] [reps=3]   (docs/HISTORY.md: 300 7 3)
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +52,15 @@ static int cycles_fd() {
   a.exclude_hv = 1;
   return int(syscall(SYS_perf_event_open, &a, 0, -1, -1, 0));
 }
+static int instr_fd(int group) {
+  perf_event_attr a{};
+  a.type = PERF_TYPE_HARDWARE;
+  a.size = sizeof a;
+  a.config = PERF_COUNT_HW_INSTRUCTIONS;
+  a.exclude_kernel = 1;
+  a.exclude_hv = 1;
+  return int(syscall(SYS_perf_event_open, &a, 0, -1, group, 0));
+}
 static long long rd(int fd) { long long v = 0; return read(fd, &v, 8) == 8 ? v : -1; }
 
 int main(int argc, char** argv) {
@@ -59,6 +69,8 @@ int main(int argc, char** argv) {
   const int reps = argc > 3 ? atoi(argv[3]) : 3;
   ddfast::init(nullptr);
   const int fd = cycles_fd();
+  const int fi = instr_fd(-1);
+  double ins_p = 0, ins_t = 0;
   const auto ps = random_problems(n, seed);
   const auto ds = random_deals(n, seed);
   std::vector<uint8_t> tricks(n);
@@ -68,16 +80,18 @@ int main(int argc, char** argv) {
   ddfast::solve(ps.data(), 1, tricks.data());  // warm-up
   double best_p = 1e30, best_t = 1e30;
   for (int r = 0; r < reps; r++) {
-    const long long c0 = rd(fd);
+    const long long c0 = rd(fd), i0 = rd(fi);
     for (size_t i = 0; i < n; i++) ddfast::solve(&ps[i], 1, &tricks[i]);
     best_p = std::min(best_p, double(rd(fd) - c0) / double(n));
+    ins_p = double(rd(fi) - i0) / double(n);
   }
   for (int r = 0; r < reps; r++) {
-    const long long c0 = rd(fd);
+    const long long c0 = rd(fd), i0 = rd(fi);
     for (size_t i = 0; i < n; i++) ddfast::solve_table(ds[i], tabs[i]);
     best_t = std::min(best_t, double(rd(fd) - c0) / double(n));
+    ins_t = double(rd(fi) - i0) / double(n);
   }
   mix(tricks.data(), n);
   for (auto& t : tabs) mix(t.tricks, sizeof t.tricks);
-  printf("problems %.2fM cycles  tables %.1fM cycles  hash %016llx\n", best_p / 1e6, best_t / 1e6, (unsigned long long)h);
+  printf("problems %.2fM cycles %.2fM instr  tables %.1fM cycles %.1fM instr  hash %016llx\n", best_p / 1e6, ins_p / 1e6, best_t / 1e6, ins_t / 1e6, (unsigned long long)h);
 }
