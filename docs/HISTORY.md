@@ -64,8 +64,10 @@ Highway as two code paths: exactly the instructions of #5, so the Highway path c
 AVX-512 code nothing), #8 (CI), #10 (tables folded into ddfast), #16 (opt-in mapping of the
 table files) and #19 (the 4-card table with all four suits sorted at no trumps: +0.5% here; it
 mostly shrinks the table file, 540 MB against 836 MB). The PRs are numbered by when they were
-opened, not merged: #7 and #8 reached `main` before #6. #28 to #30 are measured on the M5 only
-(below).
+opened, not merged: #7 and #8 reached `main` before #6. #28 (switches for the bounds and the
+cut-off cards at run time), #29 and #30 (table batches hand out single strains, for small
+batches: NOTES round 21) are not measured here; on the M5 #28 and #30 are within 1.2% of #25
+on this workload.
 
 ## On an Apple M5
 
@@ -109,40 +111,15 @@ From #10 to #25: 17% fewer cycles per problem and 22% fewer per table on one thr
 - **Throughput on four threads is less steady than cycles.** Every point lost about 10% between
   the first round and the later ones (#10: 990, 878, 899 problems per second), as the machine
   warmed. Within one round #25 is 13-18% ahead of #19 on problems and 20-25% on tables.
-- **Smaller positions gain less**: the next section but one.
-
-### #25 to #30
-
-The later points against #25, measured together on 2026-11-22 on the idle machine on mains
-power (the earlier points are not run again; #25 repeats its row above to 0.1%). Three
-alternating rounds, the lowest cycles.
-
-| Point | Commit | Change | One thread, problem: M cycles (M instructions) | One thread, table: M cycles (M instructions) | Four threads, problem / table: M cycles |
-|---|---|---|---|---|---|
-| #25 | `af908de` | (as above) | 13.43 (52.53) | 110.9 (436.8) | 13.47 / 110.3 |
-| #28 | `2c8139c` | `set_options()`: the bounds and the cut-off cards can be turned off at run time | 13.58 (53.03) | 112.2 (440.8) | 13.48 / 111.2 |
-| #30 | `ee54702` | Table batches hand out one strain of a deal at a time | 13.54 (53.03) | 112.0 (440.8) | 13.46 / 111.2 |
-
-- **#28 costs 1%**: 0.95% more instructions per problem and 0.9% per table, and 1.1% and 1.2% more
-  cycles on one thread. The switches are tested at run time where the code was compiled in
-  or out.
-- **#30 leaves the work as it was** (the instructions of #28) and does not show at 300 tables a
-  batch: tables per second on four threads were 127.4, 121.6, 118.6 at #28 and 124.6, 122.8,
-  120.2 at #30 in the three rounds (133.5, 121.5, 109.8 at #25), the machine warming from
-  round to round. Its gain is in small batches, where whole tables left threads waiting at
-  the end: with 600 tables in batches of 32, 118.2 -> 121.1 tables per second on four threads
-  and 140.0 -> 170.6 on ten; in batches of 100, 109.8 -> 110.8 and 152.1 -> 164.9 (NOTES,
-  round 21; measured with other work on the machine).
-- **#24 and #29** change `SolveBoard` with `solutions` 3 and `card_results`, which this
-  workload does not call: the next section.
+- **Smaller positions gain less**: the next section.
 
 ## A bot's play: smaller positions and every card's score (Apple M5)
 
 A bot that plays a deal (BEN, a single-dummy solver) does not solve full deals. It fixes the
 two hands it can see, deals the other two many times, and solves each sample from the trick
 being played, often for the score of every card it could play. `bench/bench_play_history.cpp`
-measures that work at every point, on one thread, with the libraries and the compiler of the
-section above:
+measures that work at every point from #16 to #29, on one thread, with the compiler of the
+section above (measured 2026-11-22, the machine idle and on mains power):
 
 - **Batches of 32:** a random deal and strain played out at random to the trick wanted; then
   the hands of the two seats other than the one to play and its partner are re-dealt 32
@@ -218,7 +195,7 @@ Every card's result at a lead, `card_results`:
   cards: both #24 and #29 leave `SolveBoard` there as it was.
 - **One best card at a lead** (`solutions` 1) follows the positions: -9% at 11 cards, -3% at
   10, nothing below.
-- **#28** costs under 1% here too.
+- **#28** costs under 1% here.
 
 ## Before git
 
@@ -247,18 +224,16 @@ THREADS=4 REPS=5 sh bench/history.sh 3 pr10:f8319fa pr11:157e688 pr16:702b50b pr
   pr24:9c9d2ca pr25:af908de
 ```
 
-The later points and the play benchmark (`PLAY=1`; `bin/libdds.a` must be built here, and
-`SCALE`, default 2, multiplies the numbers of batches):
+The play benchmark (`PLAY=1`; `bin/libdds.a` must be built here, and `SCALE`, default 2,
+multiplies the numbers of batches):
 
 ```sh
-sh bench/history.sh 3 pr25:af908de pr28:2c8139c pr30:ee54702
-THREADS=4 REPS=5 sh bench/history.sh 3 pr25:af908de pr28:2c8139c pr30:ee54702
 PLAY=1 sh bench/history.sh 3 pr16:702b50b pr19:58c41aa pr21:8bd213a pr24:9c9d2ca pr25:af908de \
   pr28:2c8139c pr29:66a36f5
 ```
 
 The M5 figures were made with Apple clang 17 (the command-line tools). Xcode's clang 21 makes
-the same source about 2% slower (53.98M instructions per problem against 53.00M at #30); with
+the same source about 2% slower (53.98M instructions per problem against 53.00M at `ee54702`); with
 both installed, `DEVELOPER_DIR=/Library/Developer/CommandLineTools` in front of the commands
 selects the first.
 
