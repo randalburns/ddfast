@@ -172,9 +172,45 @@ int at_least(const PlayPosition& p, int target, bool keep_table) {
   return at_least_play(s, target) ? 1 : 0;
 }
 
+// Every card's result. A full solve per card starts each from a fresh guess (a trick start) or
+// halves the range (in the middle of a trick). The cards' results lie close together, so
+// (docs/NOTES.md, round 20):
+// - at a lead, the position's value first. No card scores more for the side to play, and two
+//   in three score exactly that, so each card is asked "at least that?" and one less until yes.
+// - with one or two cards played, the first card is solved and each later card is asked about
+//   the best score so far: one more until no, or one less until yes. (The position's value
+//   would cost as much as the cards' questions here.)
+// - with three cards played, a full solve per card: each is a trick start, which the solver
+//   guesses well by itself.
 int card_results(const PlayPosition& p, CardResult* out, bool keep_table) {
   Play s;
   if (!load(p, keep_table, s)) return -1;
+  const bool ns = (to_play(s) & 1) == 0;
+  const int left = tricks_left(s);
+  // Scores below are the side to play's tricks from s on; v is North-South's.
+  auto side = [&](int v) { return ns ? v : left - v; };
+  // North-South's tricks when cd is played: a full solve.
+  auto solve = [&](Card cd) {
+    Play c = s;
+    const int won = play(c, cd);
+    const int v = won < 0 ? value_play(c) : won + value_start(c);
+    s.keep = c.keep;
+    return v;
+  };
+  // Does the side to play take at least sc tricks when it plays cd? For East-West that is
+  // North-South not taking left - sc + 1.
+  auto reaches = [&](Card cd, int sc) {
+    Play c = s;
+    const int won = play(c, cd);
+    const int t = ns ? sc : left - sc + 1;
+    const bool r = won < 0 ? at_least_play(c, t) : at_least_start(c, t - won);
+    s.keep = c.keep;
+    return r == ns;
+  };
+  const bool each = s.played == 3;
+  const bool lead = s.played == 0;
+  int best = -1;  // at a lead the best any card scores; otherwise the best so far (-1: none yet)
+  if (lead) best = side(value_start(s));
   uint16_t lg[4];
   legal(s, lg);
   int n = 0;
@@ -183,18 +219,33 @@ int card_results(const PlayPosition& p, CardResult* out, bool keep_table) {
     int v = 0;
     for (int r = 12; r >= 0; r--) {
       if (!(lg[x] >> r & 1)) continue;
+      const Card cd{uint8_t(x), uint8_t(r + 2)};
       if (hd >> r & 1) {  // the head of a run of equal cards: solve; the rest of the run shares it
-        Play c = s;
-        const int won = play(c, Card{uint8_t(x), uint8_t(r + 2)});
-        v = won < 0 ? value_play(c) : won + value_start(c);
-        s.keep = c.keep;
+        if (each || best < 0) {
+          v = solve(cd);
+          if (!each) best = side(v);
+        } else {
+          int sc = best;
+          if (!reaches(cd, sc)) {
+            sc--;
+            while (sc > 0 && !reaches(cd, sc)) sc--;
+          } else if (!lead) {
+            while (sc < left && reaches(cd, sc + 1)) sc++;
+            best = sc;
+          }
+          v = side(sc);
+        }
       }
-      out[n++] = CardResult{Card{uint8_t(x), uint8_t(r + 2)}, uint8_t(v)};
+      out[n++] = CardResult{cd, uint8_t(v)};
     }
   }
   return n;
 }
 
+// After each card the total can only move against the side that played it, and mostly does not
+// move, so each step asks about the previous total, and one less (North-South played) or one
+// more (East-West played) until the answer changes: mostly one question in place of a full
+// solve.
 int analyse_play(const Position& start, const Card* cards, int n, uint8_t* ns_tricks) {
   PlayPosition p{};
   memcpy(p.hand, start.hand, sizeof p.hand);
@@ -208,9 +259,17 @@ int analyse_play(const Position& start, const Card* cards, int n, uint8_t* ns_tr
     uint16_t lg[4];
     legal(s, lg);
     if (c.suit > 3 || c.rank < 2 || c.rank > 14 || !(lg[c.suit] & bit(c))) return i;
+    const bool ns = (to_play(s) & 1) == 0;
     const int w = play(s, c);
     if (w > 0) won++;
-    ns_tricks[i + 1] = uint8_t(won + (tricks_left(s) > 0 || s.played > 0 ? value_play(s) : 0));
+    // at_least_play answers yes at 0 or fewer and no beyond the tricks left, so both walks end.
+    int t = ns_tricks[i];
+    if (ns) {
+      while (!at_least_play(s, t - won)) t--;
+    } else {
+      while (at_least_play(s, t + 1 - won)) t++;
+    }
+    ns_tricks[i + 1] = uint8_t(t);
   }
   return n;
 }
