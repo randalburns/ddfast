@@ -1600,3 +1600,31 @@ Exactness: `test_ddfast quick`, chunks 1-3 of the 100,000-deal reference set (37
 `tables 200 4242` all exact; `test_play 300 3` all agree with DDS; `-DSELFTEST=10` 461,012
 checks on the public set, no failure; `-DVERIFY_ORDER -DVERIFY_BOUNDS` on the public set, no
 abort; 20,000 random positions each of 6 and 9 cards a hand all correct against DDS.
+
+### Follow-up: where cut-off cards pay (branch cutoff-persist)
+
+With cut-off cards from 4 cards a hand (`CUTC_MIN` 4, as merged in #21), small searches pay
+for the table: 7-card positions took 8% more cycles than with both techniques off (54.7-55.5k
+against 50.6-50.8k per position), and BEN-style batches (`bench_libdds ... boards`) slowed by
+9-17% at tricks 4 and 7. Probing the 512 KB table, often a cache miss, costs more there than
+the better order saves. Full deals, the target, `CUTC_MIN` against cycles (best of 3
+alternating runs) and nodes:
+
+| from | problem | table | nodes |
+|---|---|---|---|
+| 4 cards | 13.67M | 132.0M | 63,461,268 |
+| 6 | 13.57M | 130.3M | 63,637,252 |
+| 8 (adopted) | 13.13M (-4%) | 126.9M (-4%) | 64,025,914 |
+| 10 | 13.75M | 131.3M | 67,291,800 |
+
+The gain is mostly in cache misses, not work: on the public set the instructions hardly move
+(33,387,532 -> 33,338,120 per deal, -0.15%) while cycles fall in every alternating pair
+(13.85-14.77M -> 13.33-13.39M); on docs/HISTORY.md's workload (300 problems and 300 tables,
+seed 7) instructions -1.4% per problem and -0.6% per table, cycles 12.15M -> 11.97M (-1.5%) and
+130.5M -> 127.2M (-2.5%), answers identical. With 8, 7-card positions are back to 51.6k (the
+bounds' part remains). A 2^12-entry table (32
+KB) also removed most of the small-search cost but was slower on full deals. Keeping entries
+across deals (no generation in the key) is worse: 68,916,396 nodes on the public set (+8.6%),
+and much slower on BEN-style batches, whose samples differ only in the hidden hands. Exact:
+`test_ddfast quick`, chunk 4, `tables 100 77`, `test_play 200 5`, 5,000 positions each of 7
+and 9 cards against DDS.
