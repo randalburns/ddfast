@@ -103,12 +103,8 @@ struct PlayPosition {
 };
 
 // North-South's tricks from p on, the current trick included, with best play; -1 if p is not a
-// valid position. keep_table as for solve_position(), with one difference for solve_play(),
-// at_least() and card_results(): the table is always kept when p is the previous call's deal
-// further on (every seat holds a subset of what it held then), but from another deal it is kept
-// only below 12 cards a hand. Worlds that share a hand or two (samples of the hidden hands)
-// reuse little of each other's table at 12 and 13 cards, and it then costs more than it saves.
-// So a caller can pass true through a whole batch of related worlds in one strain.
+// valid position. keep_table as for solve_position(); Options::keep_other_deal_below limits it
+// for batches of other deals.
 int solve_play(const PlayPosition& p, bool keep_table = false);
 
 // 1 if North-South take at least `target` tricks from p on (the current trick included), 0 if
@@ -213,14 +209,27 @@ void stop_pool();
 // Pins the calling thread to one CPU; false if that fails.
 bool pin_thread(int cpu);
 
-// Two techniques from bridge-solver (Hanhong Xue; README), both on by default. They help single
-// solves and full tables (24% fewer nodes, 13% fewer cycles), but cost card_results() with a kept
-// table about 6% more cycles and 8% more instructions (the harness's all-moves batches), all of
-// it from the cut-off cards. Process-wide: set before solving, not while another thread solves. Answers are the same
-// either way; only the work changes.
+// Options. Process-wide: set before solving, not while another thread solves. Answers are the
+// same with any setting; only the work changes.
+//
+// sure_trick_bounds, cutoff_cards: two techniques from bridge-solver (Hanhong Xue; README), both
+// on by default. They help single solves and full tables (24% fewer nodes, 13% fewer cycles),
+// but cost card_results() with a kept table about 6% more cycles and 8% more instructions (the
+// single-dummy-bridge harness's all-moves batches), all of it from the cut-off cards.
+//
+// keep_other_deal_below: for callers that solve batches of other deals in one strain with
+// keep_table (worlds sharing a hand or two: a player's samples of the hidden hands). Off at 14,
+// the default: keep_table is taken as given. At N <= 13, solve_play(), at_least() and
+// card_results() keep the table from the previous call only when the position is that call's
+// deal further on (every seat holds a subset of what it held then) or has fewer than N cards a
+// hand. At 12 and 13 cards such worlds reuse little of each other's table, and it then costs
+// more than it saves; 12 suits the harness (5% less time on its batches). Leave it off when
+// the calls move about within one deal (back a card, or along another line of play): such a
+// position does not hold subsets of the previous one, and would lose its table from N cards up.
 struct Options {
-  bool sure_trick_bounds = true;  // bs_bounds() after DDS's quick and later tricks
-  bool cutoff_cards = true;       // the card that last cut off, tried first (from 8 cards a hand)
+  bool sure_trick_bounds = true;   // bs_bounds() after DDS's quick and later tricks
+  bool cutoff_cards = true;        // the card that last cut off, tried first (from 8 cards a hand)
+  int keep_other_deal_below = 14;  // 14: off; 12: another deal's table only below 12 cards a hand
 };
 void set_options(const Options& options);
 Options options();
