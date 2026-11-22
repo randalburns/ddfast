@@ -1600,3 +1600,49 @@ Exactness: `test_ddfast quick`, chunks 1-3 of the 100,000-deal reference set (37
 `tables 200 4242` all exact; `test_play 300 3` all agree with DDS; `-DSELFTEST=10` 461,012
 checks on the public set, no failure; `-DVERIFY_ORDER -DVERIFY_BOUNDS` on the public set, no
 abort; 20,000 random positions each of 6 and 9 cards a hand all correct against DDS.
+
+## Round 19: every card's score at a lead (branch all-cards-value-first, 2026-11-21)
+
+Aim: BEN's calls at 8 to 11 cards a hand in batches of 32 (two hands fixed, the other two
+re-dealt). Measured on an Apple M5, one thread, `bench_libdds LIB boards 32 1` with `STAGES`
+(new: the stages of play to run) and bridge-solver at 61a6e59 as LIB.
+
+`SolveBoard` with `solutions` 3 (every card's score, what BEN asks for) did a full solve per
+card, each from a fresh guess. At a lead it cost 2 to 2.6 times a `solutions` 1 call, and
+there bridge-solver came within 1.2-1.4x of ddfast, against 1.6-2.5x elsewhere. Now, at a
+lead, the position is solved first: no card scores more than its value, so each card is asked
+"at least the value?" and one less until the answer is yes. Of the cards at a lead 66% score
+the value, 24% one less, 7% two less (79%, 14%, 5% in the middle of a trick): about 1.5
+questions a card.
+
+ms per batch of 32, every card scored, 12 positions a row, before -> after:
+
+| cards a hand | at a lead | 1 card played | 2 played | 3 played |
+|---|---|---|---|---|
+| 13 | 252.4 -> 197.5 (-22%) | 0% | 0% | +10% |
+| 12 | 136.1 -> 108.6 (-20%) | -6% | -2% | -3% |
+| 11 | 46.1 -> 34.3 (-26%) | -3% | -1% | -2% |
+| 10 | 24.6 -> 19.4 (-21%) | -3% | 0% | +14% |
+| 9 | 6.07 -> 4.93 (-19%) | -1% | -1% | +2% |
+| 8 | 2.73 -> 2.16 (-21%) | -8% | +6% | +17% |
+| 7 | 0.85 -> 0.62 (-27%) | -2% | +5% | +11% |
+| 6 | 0.30 -> 0.22 (-27%) | | | |
+| 5 | 0.10 -> 0.07 (-30%) | | | |
+
+So it is used at a lead, at every size, and not in the middle of a trick, where the extra
+solve is not repaid. `DDFAST_OLD3` gives a full solve per card everywhere. `solutions` 1 and 2,
+tables and `ddfast::card_results` (which still solves per card) are unchanged.
+
+Tried for the same workload and not adopted (cycles per position, trick starts, `solutions`
+1, batches of 32):
+
+- Switched off in turn at 8, 9, 10, 11 cards: cut-off cards -6%, -6%, -2%, 0 to +2% (they
+  cost at 8 and 9 cards: a call that small ends before the 512 KB table is reused; a size
+  gate or a smaller table for small calls is not tried yet); `BSB` -1%, -1%, +5%, +10%; the
+  4-card table +23%, +17%, +15%, +13%; the 3-card table 0 to +2%.
+- A perfect first target: -6 to -9%. The previous sample's value or the median of the batch's
+  first four as the first target: no gain (values within a batch span 4.6 to 5.8 tricks).
+- The search table kept across the batch's samples: 6 to 30% slower, with more nodes.
+- Interleaved searches on one thread: 1 to 5% at 2 or 4 contexts, slower beyond.
+- Four threads on a batch of 32: 3.3x.
+

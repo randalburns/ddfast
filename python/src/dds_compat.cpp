@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <condition_variable>
 #include <mutex>
@@ -325,9 +326,28 @@ int solve_board(const unsigned remain[4][4], int trump, int first, const int ts[
   auto side_score = [&](int ns) { return side_ns ? ns : left - ns; };
 
   if (solutions == 3) {
-    for (Group& x : g) {
-      x.score = side_score(ns_after(p, x.top, keep));
+    // At a lead: the position's value first. No card scores more, and two in three score
+    // exactly that, so each card is then asked "at least that?" and one less until yes: about
+    // 1.5 questions a card in place of a full solve from a fresh guess. In the middle of a
+    // trick the extra solve does not pay (docs/NOTES.md, round 19): a full solve per card.
+    // DDFAST_OLD3 (any value): a full solve per card everywhere, to compare.
+    static const bool old3 = getenv("DDFAST_OLD3") != nullptr;
+    if (old3 || played > 0) {
+      for (Group& x : g) {
+        x.score = side_score(ns_after(p, x.top, keep));
+        keep = true;
+      }
+    } else {
+      const int best = side_score(ns_value(p, keep));
       keep = true;
+      auto reaches = [&](const Group& x, int sc) {
+        return side_ns ? ns_at_least_after(p, x.top, sc, keep) : !ns_at_least_after(p, x.top, left - sc + 1, keep);
+      };
+      for (Group& x : g) {
+        int sc = best;
+        while (sc > 0 && !reaches(x, sc)) sc--;
+        x.score = sc;
+      }
     }
     std::stable_sort(g.begin(), g.end(), [](const Group& a, const Group& b) { return a.score > b.score; });
     f.cards = nm;
