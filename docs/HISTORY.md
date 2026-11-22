@@ -1,7 +1,7 @@
 # ddfast's speed over its history
 
 How ddfast's own speed changed across the commits that moved it, on Linux x86-64 with the
-AVX-512 code, measured with one program at every point. [NOTES.md](NOTES.md) has the reasoning
+AVX-512 code, measured with one program at every point; and from #10 on, on an Apple M5. [NOTES.md](NOTES.md) has the reasoning
 and the full measurements behind each step.
 
 ## Method
@@ -65,6 +65,52 @@ table files) and #19 (the 4-card table with all four suits sorted at no trumps: 
 mostly shrinks the table file, 540 MB against 836 MB). The PRs are numbered by when they were
 opened, not merged: #7 and #8 reached `main` before #6.
 
+## On an Apple M5
+
+The same program and deals on an Apple M5 Mac (4 performance and 6 efficiency cores, 16 GB),
+each library built for it (`-mcpu=native`: the Highway NEON code, and table-driven pext/pdep,
+which Arm lacks). Measured 2026-11-21.
+
+- **Points:** from #10 on. Before #7 the solver was AVX-512 only, and commits before #10 need
+  ddclaim's checkout.
+- **Counters:** the process's cycles and instructions from `proc_pid_rusage`, which count
+  system time as well as user time, so the instructions repeat to about 0.1% and not to the
+  last digit.
+- **Cores:** macOS cannot pin a thread. The program asks for a performance core (user-interactive
+  quality of service), as ddfast's pool threads do.
+- **Four threads:** the same 300 problems and 300 tables as batches (`solve_parallel`,
+  `solve_tables_parallel`) on four threads, `THREADS=4 REPS=5`. Cycles are summed over the
+  threads; problems and tables per second are the best of three rounds.
+- **Tables:** `p4_v5` up to #16 and `p4_v6` from #19, both filled on this machine.
+
+Three rounds alternating over all points; cycles are the lowest. The hash of the answers is the
+same at every point and the same as on the Zen 5.
+
+| Point | Commit | One thread, problem: M cycles (M instructions) | One thread, table: M cycles (M instructions) | Four threads, problem / table: M cycles | Four threads: problems/s, tables/s |
+|---|---|---|---|---|---|
+| #10 | `f8319fa` | 16.12 (59.97) | 142.7 (535.1) | 16.12 / 143.4 | 990, 104.9 |
+| #11 | `157e688` | 16.13 (59.98) | 140.7 (527.1) | 16.04 / 140.3 | 934, 102.2 |
+| #16 | `702b50b` | 16.10 (59.97) | 140.4 (527.1) | 16.00 / 139.8 | 953, 100.6 |
+| #19 | `58c41aa` | 16.04 (59.79) | 139.8 (525.8) | 16.02 / 139.2 | 957, 99.2 |
+| #21 | `8bd213a` | 13.85 (52.57) | 114.9 (441.4) | 13.78 / 114.3 | 1,093, 119.7 |
+| #24 | `9c9d2ca` | 13.86 (52.57) | 115.1 (441.4) | 14.03 / 116.3 | 1,042, 114.2 |
+| #25 | `af908de` | 13.42 (52.53) | 110.9 (436.9) | 13.61 / 112.2 | 1,083, 119.0 |
+
+From #10 to #25: 17% fewer cycles per problem and 22% fewer per table on one thread, 16% and
+22% on four.
+
+- **The steps are the Zen 5's.** #21 takes 14% of the cycles per problem and 18% per table (12%
+  and 16% of the instructions); #25 another 3% and 3.5% with hardly any fewer instructions;
+  #11 moves tables only; #16, #19 and #24 are within 1%.
+- **Four threads cost the same cycles as one**, within 1.5% at every point: the threads do not
+  slow each other.
+- **Throughput on four threads is less steady than cycles.** Every point lost about 10% between
+  the first round and the later ones (#10: 990, 878, 899 problems per second), as the machine
+  warmed. Within one round #25 is 13-18% ahead of #19 on problems and 20-25% on tables.
+- **Smaller positions gain less.** Trick starts in batches of 32 with two hands fixed (as in
+  NOTES round 19), one thread, #10 to #25: no change at 7 to 9 cards a hand (#21 cost about 6%
+  at 8 cards and #25 took most of it back), -3% at 10, -10% at 11, -7% at 12.
+
 ## Before git
 
 The solver entered git (`03d1b25`) after fifteen rounds of work recorded in NOTES, which are
@@ -80,6 +126,16 @@ per second; the rounds after brought it to about 4 times DDS. The repository's f
 export DDFAST_TABLES=/path/to/tables
 sh bench/history.sh 3 start:03d1b25 pr01:8aee46d pr02:5661a1d pr06:4eda109 pr11:157e688 pr21:8bd213a \
   pr25:af908de
+```
+
+On macOS (`taskset` is not used; `THREADS` and `REPS` as above):
+
+```sh
+export DDFAST_TABLES=/path/to/tables
+sh bench/history.sh 3 pr10:f8319fa pr11:157e688 pr16:702b50b pr19:58c41aa pr21:8bd213a pr24:9c9d2ca \
+  pr25:af908de
+THREADS=4 REPS=5 sh bench/history.sh 3 pr10:f8319fa pr11:157e688 pr16:702b50b pr19:58c41aa pr21:8bd213a \
+  pr24:9c9d2ca pr25:af908de
 ```
 
 Commits before #10 need ddclaim's checkout for their `extern/ddclaim` (`DDCLAIM_REPO`,
