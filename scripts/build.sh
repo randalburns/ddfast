@@ -68,20 +68,21 @@ DDSINC="-Iextern/dds/library/src -Iextern/dds/library/src/api"
 echo "build.sh: $CXX, output $OUT${XFLAGS:+, XFLAGS=$XFLAGS}"
 
 # The library: the CPU check and the endgame tables (compiled without XFLAGS) and the search.
-rm -f "$OUT/obj/cpu.o" "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
+rm -f "$OUT/obj/cpu.o" "$OUT/obj/tables.o" "$OUT/obj/solver.o" "$OUT/obj/solver_rt.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o"
 # shellcheck disable=SC2086
 {
   $CXX $BASE -Isrc -c src/cpu.cpp -o "$OUT/obj/cpu.o" &
   $CXX $BASE -Isrc -c src/tables.cpp -o "$OUT/obj/tables.o" &
   $CXX $BASE $XFLAGS $INC -c src/solver.cpp -o "$OUT/obj/solver.o" &
+  $CXX $BASE $XFLAGS $INC -Isrc -c src/solver_rt.cpp -o "$OUT/obj/solver_rt.o" &
   $CXX $BASE $XFLAGS $INC -Isrc -c src/par_deal.cpp -o "$OUT/obj/par_deal.o" &
   $CXX $BASE $XFLAGS $INC -c src/api.cpp -o "$OUT/obj/api.o" &
   $CXX $BASE $XFLAGS $INC -c src/play.cpp -o "$OUT/obj/play.o" &
   wait
 }
-[ -f "$OUT/obj/cpu.o" ] && [ -f "$OUT/obj/tables.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
+[ -f "$OUT/obj/cpu.o" ] && [ -f "$OUT/obj/tables.o" ] && [ -f "$OUT/obj/solver.o" ] && [ -f "$OUT/obj/solver_rt.o" ] && [ -f "$OUT/obj/par_deal.o" ] && [ -f "$OUT/obj/api.o" ] && [ -f "$OUT/obj/play.o" ]
 rm -f "$OUT/libddfast.a"
-ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/tables.o" "$OUT/obj/cpu.o"
+ar rcs "$OUT/libddfast.a" "$OUT/obj/solver.o" "$OUT/obj/solver_rt.o" "$OUT/obj/par_deal.o" "$OUT/obj/api.o" "$OUT/obj/play.o" "$OUT/obj/tables.o" "$OUT/obj/cpu.o"
 # shellcheck disable=SC2086
 $CXX $BASE $INC tools/ddfast_cli.cpp "$OUT/libddfast.a" -pthread -o "$OUT/ddfast"
 [ "${LIBONLY:-0}" = 1 ] && { echo "build.sh: done (library and tool)"; exit 0; }

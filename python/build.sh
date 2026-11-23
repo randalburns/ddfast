@@ -35,7 +35,7 @@ if [ "$(uname -s)" = Darwin ]; then
   echo "python/build.sh: $CXX (macOS), nanobind $NB"
   # shellcheck disable=SC2086
   {
-    for f in cpu tables solver par_deal api play; do $CXX $BASE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/core/$f.o & done
+    for f in cpu tables solver solver_rt par_deal api play; do $CXX $BASE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/core/$f.o & done
     $CXX $BASE $DDS -w -c extern/dds/library/src/pbn.cpp -o $OBJ/core/dds_pbn.o &
     $CXX $BASE $DDS -w -c extern/dds/library/src/par.cpp -o $OBJ/core/dds_par.o &
     $CXX $BASE $DDS -w -c extern/dds/library/src/dealer_par.cpp -o $OBJ/core/dds_dealer_par.o &
@@ -107,7 +107,7 @@ mkdir -p $OBJ/core $OBJ/py $OBJ/capi
 rm -f $OBJ/*.o
 # shellcheck disable=SC2086
 {
-  for f in cpu tables solver par_deal api play; do $CXX $CORE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/core/$f.o & done
+  for f in cpu tables solver solver_rt par_deal api play; do $CXX $CORE -Iinclude -Isrc -c src/$f.cpp -o $OBJ/core/$f.o & done
   $CXX $CORE $DDS -c extern/dds/library/src/pbn.cpp -o $OBJ/core/dds_pbn.o &
   $CXX $CORE $DDS -c extern/dds/library/src/par.cpp -o $OBJ/core/dds_par.o &
   $CXX $CORE $DDS -c extern/dds/library/src/dealer_par.cpp -o $OBJ/core/dds_dealer_par.o &
