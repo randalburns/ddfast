@@ -1860,3 +1860,52 @@ Exactness: `test_ddfast quick` all exact; `test_play 300 1` agrees with DDS with
 off, at 12 and at 9 (`--keep-below`), with a new check that `card_results` gives the same with
 the table kept; `bench_cards` fails if a related-worlds batch answers differently in any of
 its three timings (hash `3fa26005a895bf4c`).
+
+## Round 23: the options cost nothing at their defaults (branch options-per-solve, 2026-11-23)
+
+`set_options()` (#28) turned two compile-time constants of the search into globals read at
+every node: the size from which cut-off cards are used, and whether the sure-trick bounds
+run. Every solve paid for it. Apple M5, clang 17, 300 problems and 300 tables
+(`bench_history 300 7`), five alternating rounds, lowest and median:
+
+| | problem: M cycles | problem: M instructions | table: M cycles | table: M instructions |
+|---|---|---|---|---|
+| #25 (constants) | 13.41 / 13.49 | 52.53 | 111.0 / 111.5 | 436.8 |
+| #28 | 13.58 / 13.63 | 53.03 | 112.1 / 113.0 | 440.8 |
+| main after #33 | 13.55 / 13.62 | 53.03 | 112.0 / 112.5 | 440.8 |
+
+So 0.95% more instructions per problem and 0.9% per table since #28, and 1% more cycles;
+#29 to #33 add nothing.
+
+Now the search is compiled once more, as `src/solver_rt.cpp` (`DDF_RT`), reading the options;
+in `solver.cpp` the defaults are constants again. `ask()`, which starts every question, hands
+it to that copy (`rt_ask`) when an option is not at its default; the copy searches the
+caller's position and tables (the per-thread `Hot` state goes there and back; it keeps its own
+cut-off table). Result: 52.57M instructions per problem and 437.5M per table, the figures of
+#25, with the same answers.
+
+What did not work:
+
+- The options copied into the per-thread state at the start of each solve and read there:
+  no fewer instructions than the globals (53.5M per problem in one run). The cost is not
+  where the value is read from but that it is not a constant.
+- `lead` and `follow` with a second template parameter, both versions in `solver.cpp`:
+  53.8M instructions per problem, worse than the globals. With only the constant version
+  instantiated the same source gives 52.57M. The functions that `lead` and `follow` call have
+  one caller each and are inlined for that; with two callers they were not. Hence a second
+  file and not a second instantiation.
+
+With an option off the search is the one main had: instructions per problem on 200 problems,
+this branch against main: bounds off 55.77M / 55.75M, cut-off cards off 56.60M / 56.51M, both
+off 62.21M / 62.18M (defaults 49.02M / 49.50M), the same answers in every case.
+
+Not carried over to the copy: the development switches `LEAN_NOP4`, `LEAN_NOT3` and
+`LEAN_NOT2` (read in `init()` for solver.cpp's copy of the table state only), `-DSTATS`
+counters (they count solver.cpp's nodes only), and the handing over between interleaved
+searches (`solve_positions`): a search in the copy runs to its end.
+
+Exactness: `test_ddfast quick` and `test_play 300 1` by default, with `--no-bounds`, with
+`--no-cutoff` and with both; `random 1000 5` by default and with `--no-cutoff`; `tables 100 3`
+with `--no-bounds`; `test_play 300 2 --keep-below 12 --no-bounds`: all exact, all agree with
+DDS.
+

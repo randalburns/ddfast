@@ -40,6 +40,9 @@ unsigned long long nodes();              // nodes searched, lead and follow (STA
 // through the GOT.
 extern bool g_sure_trick_bounds __attribute__((visibility("hidden")));  // Options::sure_trick_bounds
 extern int g_cutoff_min __attribute__((visibility("hidden")));  // cut-off cards from this many cards a hand; 14: never
+// One question answered by the search that reads the options (solver_rt.cpp), on the caller's
+// position and tables: hot is the caller's per-thread search state.
+bool rt_ask(bool nt, int n, int L, int target, uint64_t& R, void* hot);
 extern int g_keep_other_deal_below;      // Options::keep_other_deal_below (play.cpp); 14: off
 extern const uint8_t* g_first_target;    // development: per position, the first target (0: the usual guess)
 

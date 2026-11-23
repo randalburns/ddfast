@@ -6,9 +6,16 @@
 // ddfast::detail at the end, used by api.cpp.
 // DDF_PAR: this file compiled a second time inside src/par_deal.cpp, for the parallel search
 // of one deal (its own thread-local state, abort checks, no STATS counters, no entry points).
-#ifdef DDF_PAR
+// DDF_RT: compiled a third time as src/solver_rt.cpp, the search that reads the options of
+// set_options() at every node. Here the default options are constants, which is what a node
+// costs least with (about 1% of a full solve: docs/NOTES.md, round 23); with other options
+// ask() hands each question to that copy (rt_ask), which searches this copy's position and
+// tables. Two files and not two instantiations of lead and follow in one, because functions
+// that have a single caller here are inlined, and with two callers they were not.
+#if defined(DDF_PAR) || defined(DDF_RT)
 #undef STATS
 #endif
+#include <mutex>
 #include <unordered_map>
 #include "port.hpp"
 
@@ -37,7 +44,7 @@
 #include "dds_port.hpp"
 #include "internal.hpp"
 
-#ifndef DDF_PAR
+#if !defined(DDF_PAR) && !defined(DDF_RT)
 namespace ddfast::detail {
 const uint8_t* g_first_target;
 bool g_sure_trick_bounds = true;
@@ -2335,6 +2342,8 @@ inline u64 add_runs(u64 R, u64 tried, u64 hand, u64 all) {
 #endif
 template <bool NT>
 bool lead(int n, int L, int target, u64& R);
+template <bool NT>
+inline bool ask(int n, int L, int target, u64& R);
 thread_local SState* g_alt = nullptr;
 thread_local u64 g_st_rng = 88172645463325252ull, g_st_cnt = 0, g_st_checks = 0;
 thread_local int g_st_depth = 0;
@@ -2369,7 +2378,7 @@ void self_test(int n, int L, int target, u64 R, bool res) {
   S->tt.reset();
   g_st_depth++;
   u64 R2;
-  const bool r2 = lead<NT>(n, L, target, R2);
+  const bool r2 = ask<NT>(n, L, target, R2);
   g_st_depth--;
   S = keep;
   // The item may have been aborted during the re-search, which then has no real value.
@@ -2396,7 +2405,15 @@ struct STPrint { ~STPrint() { fprintf(stderr, "selftest checks %llu\n", (unsigne
 // costs more than the better order saves. Full deals, best of 3 (NOTES round 18): 4 cards
 // 13.67M cycles a problem and 132.0M a table, 6: 13.57M and 130.3M, 8: 13.13M and 126.9M,
 // 10: 13.75M and 131.3M.
+// The options in the search: read where this file is compiled to read them (DDF_RT, and the
+// parallel search of one deal), the defaults as constants otherwise.
+#if defined(DDF_PAR) || defined(DDF_RT)
 #define CUT_FROM (ddfast::detail::g_cutoff_min)  // CUTC_MIN, or 14 with cut-off cards off
+#define SURE_BOUNDS (ddfast::detail::g_sure_trick_bounds)
+#else
+#define CUT_FROM CUTC_MIN
+#define SURE_BOUNDS true
+#endif
 #ifndef CUTF
 #define CUTF 1
 #endif
@@ -2562,7 +2579,7 @@ bool lead(int n, int L, int target, u64& R) {
       return value;
     }
 #if BSB
-    if (ddfast::detail::g_sure_trick_bounds && bs_bounds<NT>(n, L, target, all, R, value)) {
+    if (SURE_BOUNDS && bs_bounds<NT>(n, L, target, all, R, value)) {
       STAT(g_bsb++);
       tt_store(R, value, 0);
       return value;
@@ -3279,6 +3296,18 @@ inline int guess(int n, int L) {
   return e < 1 ? 1 : e > n ? n : e;
 }
 
+// One question from the top. With options other than the defaults the search of
+// src/solver_rt.cpp answers it, on this thread's position and tables (the Hot state goes
+// there and back).
+template <bool NT>
+inline bool ask(int n, int L, int target, u64& R) {
+#if !defined(DDF_PAR) && !defined(DDF_RT)
+  if (!ddfast::detail::g_sure_trick_bounds || ddfast::detail::g_cutoff_min != CUTC_MIN) [[unlikely]]
+    return ddfast::detail::rt_ask(NT, n, L, target, R, &g_hot);
+#endif
+  return lead<NT>(n, L, target, R);
+}
+
 template <bool NT>
 int solve_one(int n, int L, int first) {
   ensure_state();
@@ -3312,11 +3341,11 @@ int solve_one(int n, int L, int first) {
     STAT(g_queries++);
 #ifdef STATS
     const u64 qn0 = g_nodes;
-    const bool qr = lead<NT>(n, L, t, R);
+    const bool qr = ask<NT>(n, L, t, R);
     if (n == 13 && nq <= 4) qp += snprintf(qb + qp, sizeof qb - qp, " q%d %d %d %llu", nq, t, int(qr), (unsigned long long)(g_nodes - qn0));
     if (qr) {
 #else
-    if (lead<NT>(n, L, t, R)) {
+    if (ask<NT>(n, L, t, R)) {
 #endif
       lo = t;
       t = lo + 1;
@@ -3343,7 +3372,7 @@ bool ask_one(int n, int L, int t) {
 #endif
   u64 R;
   STAT(g_queries++);
-  return lead<NT>(n, L, t, R);
+  return ask<NT>(n, L, t, R);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -3353,6 +3382,9 @@ bool ask_one(int n, int L, int t) {
 #ifdef DDF_PAR
 #define ddfast_ctx_switch ddfast_par_ctx_switch
 DDPORT_DEFINE_CTX_SWITCH(ddfast_par_ctx_switch)
+#elif defined(DDF_RT)
+#define ddfast_ctx_switch ddfast_rt_ctx_switch
+DDPORT_DEFINE_CTX_SWITCH(ddfast_rt_ctx_switch)
 #else
 DDPORT_DEFINE_CTX_SWITCH(ddfast_ctx_switch)
 #endif
@@ -3490,7 +3522,7 @@ void run_batch(const ddcore::Position* positions, size_t count, uint8_t* tricks,
 #ifndef TPGUESS
 #define TPGUESS 1
 #endif
-#ifndef DDF_PAR
+#if !defined(DDF_PAR) && !defined(DDF_RT)
 namespace ddfast::detail {
 
 
@@ -3609,4 +3641,24 @@ unsigned long long nodes() {
 unsigned long long lead_nodes() { return g_mnodes; }
 
 }  // namespace ddfast::detail
-#endif  // DDF_PAR
+#endif  // DDF_PAR, DDF_RT
+
+#ifdef DDF_RT
+namespace ddfast::detail {
+// One question on the position and tables of the caller's copy of the search (solver.cpp:
+// ask()): hot is its Hot, the same struct here.
+bool rt_ask(bool nt, int n, int L, int target, uint64_t& R, void* hot) {
+  thread_local bool attached = false;
+  if (!attached) {
+    static std::once_flag once;
+    std::call_once(once, [] { ddcore::tables::attach(); });  // this file's copy of the table state
+    attached = true;
+  }
+  Hot& theirs = *static_cast<Hot*>(hot);
+  g_hot = theirs;
+  const bool r = nt ? lead<true>(n, L, target, R) : lead<false>(n, L, target, R);
+  theirs = g_hot;
+  return r;
+}
+}  // namespace ddfast::detail
+#endif
